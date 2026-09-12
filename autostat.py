@@ -108,15 +108,11 @@ def get_json(url: str, *, tries: int = 4, backoff: float = 0.6):
 def add_missing_live_teams(ratings_df: pd.DataFrame,
                            live_metadata: list) -> pd.DataFrame:
     """
-    Add only teams that are CURRENTLY playing an FBS-vs-FBS live game but are
-    not already present in the calculated rankings.
+    Add only currently-live FBS teams that still do not have a calculated row.
 
-    This is intended for teams that have not yet played a completed qualifying
-    FBS-vs-FBS game. They appear only while their live game is in progress.
-
-    If the live points/drives are sufficient to produce a normal calculated row,
-    this function does nothing for that team. Otherwise it adds a temporary row
-    with a 0-0 FBS record and blank rating fields so the team is visible.
+    Normally, canonicalizing the live names and drives causes these teams to be
+    calculated normally. This is only a fallback for the opening moments of a
+    game before enough completed drives exist to calculate efficiency.
     """
     if not live_metadata:
         return ratings_df
@@ -140,7 +136,9 @@ def add_missing_live_teams(ratings_df: pd.DataFrame,
             if key in existing:
                 continue
 
-            row = {column: pd.NA for column in ratings_df.columns}
+            # np.nan keeps numeric columns numeric, allowing float_format="%.3f"
+            # to work correctly when the CSV is written.
+            row = {column: np.nan for column in ratings_df.columns}
             row["Team"] = team_name
             row["Conference"] = conference or ""
             row["W"] = 0
@@ -155,14 +153,11 @@ def add_missing_live_teams(ratings_df: pd.DataFrame,
     live_only_df = pd.DataFrame(rows, columns=ratings_df.columns)
 
     print(
-        f"Added {len(live_only_df)} live FBS team(s) that did not yet have "
-        "a qualifying rankings row."
+        f"Added {len(live_only_df)} temporary live team row(s) because "
+        "insufficient completed-drive data existed for a calculated rating."
     )
 
-    return pd.concat(
-        [ratings_df, live_only_df],
-        ignore_index=True
-    )
+    return pd.concat([ratings_df, live_only_df], ignore_index=True)
 
 
 
@@ -244,25 +239,19 @@ def _extract_team_points(value):
 
 def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
     """
-    Overlay live-game data on top of completed season data.
+    Overlay live FBS-vs-FBS data on top of completed season data.
 
-    Completed games remain untouched.
+    Completed games remain untouched. For a live game:
+      - keep all completed-game points and drives
+      - remove only drive rows for the currently-live game
+      - patch the current score into that game's /games record
+      - append completed live drives from /live/plays
+      - keep completed=False so W/L does not change until final
 
-    For each in-progress FBS-vs-FBS game:
-      1. Keep all completed-game points and drives already in the season data.
-      2. Remove only /drives rows belonging to the current live game so that
-         the same live game cannot be counted twice.
-      3. Patch that game's current live score into the /games record.
-      4. Append completed drives from /live/plays for the current live game.
-      5. Force completed=False so W/L does not change until the game is final.
-
-    Example:
-        Completed season: 10 offensive drives, 30 points
-        Live game:         4 offensive drives, 14 points
-
-        Current totals:   14 offensive drives, 44 points
-
-        ORtg = 100 * 44 / 14
+    Team IDs are used to translate scoreboard/live names back to the canonical
+    /games team names. This prevents duplicates such as:
+        "Rutgers Scarlet Knights" vs "Rutgers"
+        "Boston College Eagles" vs "Boston College"
     """
     if not live_scoreboard:
         return games, drives_raw, []
@@ -279,9 +268,6 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
         if g.get("id") is not None
     }
 
-    # Keep every completed-game drive.
-    # Remove only rows for games that are CURRENTLY live, because those will be
-    # rebuilt from /live/plays below.
     drive_id_fields = ("gameId", "game_id", "gameID")
 
     def drive_game_id(d):
@@ -291,6 +277,8 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
                 return str(value)
         return None
 
+    # Preserve all completed-game drives. Remove only rows belonging to games
+    # that are currently live, because those games are rebuilt from /live/plays.
     updated_drives = [
         d for d in drives_raw
         if drive_game_id(d) not in live_ids
@@ -304,12 +292,27 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
             continue
 
         gid = str(game_id)
+        home_obj = board_game.get("homeTeam") or {}
+        away_obj = board_game.get("awayTeam") or {}
 
-        home_obj = board_game.get("homeTeam")
-        away_obj = board_game.get("awayTeam")
+        game_record = games_by_id.get(gid)
 
-        home_team = _extract_team_name(home_obj) or board_game.get("home")
-        away_team = _extract_team_name(away_obj) or board_game.get("away")
+        # Prefer canonical names/conferences from /games whenever available.
+        # The scoreboard may return display names that include mascots.
+        if game_record is not None:
+            home_team = game_record.get("homeTeam")
+            away_team = game_record.get("awayTeam")
+            home_conf = game_record.get("homeConference")
+            away_conf = game_record.get("awayConference")
+        else:
+            home_team = _extract_team_name(home_obj)
+            away_team = _extract_team_name(away_obj)
+            home_conf = home_obj.get("conference") if isinstance(home_obj, dict) else None
+            away_conf = away_obj.get("conference") if isinstance(away_obj, dict) else None
+
+        if not home_team or not away_team:
+            print(f"Skipping live game {gid}: missing canonical team names")
+            continue
 
         home_points = _extract_team_points(home_obj)
         away_points = _extract_team_points(away_obj)
@@ -319,34 +322,17 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
         if away_points is None:
             away_points = board_game.get("awayPoints")
 
-        if not home_team or not away_team:
-            print(f"Skipping live game {gid}: missing team names")
-            continue
-
         if home_points is None or away_points is None:
             print(f"Skipping live game {gid}: live score unavailable")
             continue
-
-        # Find the season /games row for this game. Patching this row means
-        # get_points() naturally adds the live game's current score on top of
-        # all completed-game scores.
-        game_record = games_by_id.get(gid)
 
         if game_record is None:
             game_record = {
                 "id": game_id,
                 "homeTeam": home_team,
                 "awayTeam": away_team,
-                "homeConference": (
-                    home_obj.get("conference")
-                    if isinstance(home_obj, dict)
-                    else None
-                ),
-                "awayConference": (
-                    away_obj.get("conference")
-                    if isinstance(away_obj, dict)
-                    else None
-                ),
+                "homeConference": home_conf,
+                "awayConference": away_conf,
             }
             games.append(game_record)
             games_by_id[gid] = game_record
@@ -356,15 +342,11 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
 
         game_record["homeTeam"] = home_team
         game_record["awayTeam"] = away_team
+        game_record["homeConference"] = home_conf
+        game_record["awayConference"] = away_conf
         game_record["homePoints"] = float(home_points)
         game_record["awayPoints"] = float(away_points)
         game_record["completed"] = False
-
-        if isinstance(home_obj, dict) and home_obj.get("conference"):
-            game_record["homeConference"] = home_obj.get("conference")
-
-        if isinstance(away_obj, dict) and away_obj.get("conference"):
-            game_record["awayConference"] = away_obj.get("conference")
 
         print(
             f"LIVE SCORE PATCH: {away_team} at {home_team} | "
@@ -372,7 +354,13 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
             f"live score is {away_points}-{home_points}"
         )
 
-        # Pull current live drives for this game.
+        # Map CFBD team IDs to the canonical /games names.
+        team_id_to_name = {}
+        if isinstance(home_obj, dict) and home_obj.get("id") is not None:
+            team_id_to_name[str(home_obj.get("id"))] = home_team
+        if isinstance(away_obj, dict) and away_obj.get("id") is not None:
+            team_id_to_name[str(away_obj.get("id"))] = away_team
+
         live_game = get_json_optional(
             f"https://api.collegefootballdata.com/live/plays?gameId={game_id}"
         )
@@ -381,14 +369,28 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
         team_live_drives = Counter()
 
         if isinstance(live_game, dict):
-            drive_list = live_game.get("drives") or []
+            for drive in (live_game.get("drives") or []):
+                offense_id = drive.get("offenseId")
+                defense_id = drive.get("defenseId")
 
-            for drive in drive_list:
-                offense = _extract_team_name(drive.get("offense"))
-                defense = _extract_team_name(drive.get("defense"))
+                offense = (
+                    team_id_to_name.get(str(offense_id))
+                    if offense_id is not None
+                    else None
+                )
+                defense = (
+                    team_id_to_name.get(str(defense_id))
+                    if defense_id is not None
+                    else None
+                )
+
+                # Fallback to the API's textual team names if an ID is missing.
+                offense = offense or _extract_team_name(drive.get("offense"))
+                defense = defense or _extract_team_name(drive.get("defense"))
+
                 result = drive.get("result")
 
-                # Only count drives that have actually finished.
+                # A live drive is included only after CFBD reports a result.
                 if not offense or not defense or not result:
                     continue
 
@@ -403,8 +405,8 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
 
         print(
             f"LIVE DRIVE OVERLAY: "
-            f"{away_team} live offensive drives={team_live_drives[away_team]}, "
-            f"{home_team} live offensive drives={team_live_drives[home_team]}"
+            f"{away_team}={team_live_drives[away_team]} offensive drives, "
+            f"{home_team}={team_live_drives[home_team]} offensive drives"
         )
 
         live_metadata.append({
@@ -412,12 +414,8 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
             "status": "in_progress",
             "homeTeam": home_team,
             "awayTeam": away_team,
-            "homeConference": (
-                home_obj.get("conference") if isinstance(home_obj, dict) else None
-            ),
-            "awayConference": (
-                away_obj.get("conference") if isinstance(away_obj, dict) else None
-            ),
+            "homeConference": home_conf,
+            "awayConference": away_conf,
             "homePoints": float(home_points),
             "awayPoints": float(away_points),
             "period": board_game.get("period"),
@@ -1054,13 +1052,20 @@ def main():
     # The adjusted ranking is still preserved separately in AdjRk.
     ratings_df = ratings_df.sort_values("Rk", ascending=True).reset_index(drop=True)
 
-    # Keep calculated decimal fields at exactly three decimal places.
+    # Keep calculated decimal fields numeric and force exactly three decimals
+    # in the exported CSV. This is done AFTER temporary live rows are added so
+    # blank live placeholders cannot convert these columns to object dtype.
     decimal_columns = [
         "NetRtg", "AdjRtg", "Win %", "PyW %",
         "Luck", "Luck Z", "Ortg", "DRtg", "SOS",
     ]
     decimal_columns = [c for c in decimal_columns if c in ratings_df.columns]
-    ratings_df[decimal_columns] = ratings_df[decimal_columns].round(3)
+
+    for column in decimal_columns:
+        ratings_df[column] = pd.to_numeric(
+            ratings_df[column],
+            errors="coerce"
+        ).round(3)
 
     # In GitHub Actions, GITHUB_WORKSPACE is the repository root. Locally,
     # fall back to the directory containing this script.
@@ -1075,8 +1080,21 @@ def main():
     # data/2026 Master.csv, data/2027 Master.csv, etc.
     outfile = os.path.join(data_dir, f"{YEAR} Master.csv")
 
-    # float_format preserves trailing zeroes (for example 1.000 and 140.000).
-    ratings_df.to_csv(outfile, index=False, float_format="%.3f")
+    # Keep count/total fields integer-like where applicable.
+    for column in ["Rk", "W", "L", "AdjRk", "PF", "PA", "ODrives", "DDrives", "SOS rank"]:
+        if column in ratings_df.columns:
+            ratings_df[column] = pd.to_numeric(
+                ratings_df[column],
+                errors="coerce"
+            ).astype("Int64")
+
+    # Decimal rating fields are exported with exactly three places.
+    ratings_df.to_csv(
+        outfile,
+        index=False,
+        float_format="%.3f",
+        na_rep=""
+    )
 
     # Publish a small companion JSON file used by index.html for the LIVE lights
     # and "Last updated" timestamp.
