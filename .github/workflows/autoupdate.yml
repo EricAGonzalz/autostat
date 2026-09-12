@@ -3,10 +3,6 @@ name: Update CFB Rankings
 on:
   workflow_dispatch:
 
-  schedule:
-    - cron: '3,13,23,33,43,53 * * * *' 
-    - cron: "7 10 * * *"
-    
 permissions:
   contents: read
 
