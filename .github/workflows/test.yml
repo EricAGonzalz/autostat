@@ -1,6 +1,10 @@
 name: Schedule Test
 
 on:
+  push:
+    branches:
+      - main
+
   workflow_dispatch:
 
   schedule:
@@ -13,5 +17,5 @@ jobs:
     steps:
       - name: Show trigger time
         run: |
-          echo "Schedule fired"
+          echo "Triggered by: ${{ github.event_name }}"
           date -u
