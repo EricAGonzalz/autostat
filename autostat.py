@@ -1,5 +1,7 @@
 import os
 import time
+import json
+from datetime import datetime, timezone
 from collections import Counter
 
 import numpy as np
@@ -101,6 +103,182 @@ def get_json(url: str, *, tries: int = 4, backoff: float = 0.6):
 # These totals later become the numerators of the offensive and defensive
 # efficiency formulas. Games against non-FBS teams are excluded so large
 # mismatches do not artificially inflate a team's raw rating.
+
+def get_json_optional(url: str):
+    """
+    Request JSON without terminating the rankings job if an optional live-data
+    endpoint is unavailable. The completed-game rankings can still publish.
+    """
+    try:
+        resp = SESSION.get(url, timeout=TIMEOUT)
+        if not resp.ok:
+            print(f"Live-data request skipped: HTTP {resp.status_code} for {url}")
+            return None
+        return resp.json()
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        print(f"Live-data request skipped for {url}: {exc}")
+        return None
+
+
+def get_live_scoreboard() -> list:
+    """
+    Return only FBS games currently in progress.
+
+    The scoreboard endpoint is used only for live state. If the user's CFBD
+    access tier does not include live data, this returns an empty list and the
+    script continues using completed games.
+    """
+    data = get_json_optional(
+        "https://api.collegefootballdata.com/scoreboard?classification=fbs"
+    )
+    if not isinstance(data, list):
+        return []
+
+    live_games = []
+    for game in data:
+        if str(game.get("status", "")).lower() != "in_progress":
+            continue
+
+        home = game.get("homeTeam") or {}
+        away = game.get("awayTeam") or {}
+
+        if str(home.get("classification", "")).lower() != "fbs":
+            continue
+        if str(away.get("classification", "")).lower() != "fbs":
+            continue
+
+        live_games.append(game)
+
+    return live_games
+
+
+def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
+    """
+    Merge current live scores and completed live drives into the season data.
+
+    Live points and completed drives affect efficiency/rating calculations.
+    Win/loss records do NOT change until CFBD marks the game completed.
+
+    Returns:
+        updated_games
+        updated_drives
+        live_metadata
+    """
+    if not live_scoreboard:
+        return games, drives_raw, []
+
+    games_by_id = {
+        str(g.get("id")): g
+        for g in games
+        if g.get("id") is not None
+    }
+
+    live_ids = {str(g.get("id")) for g in live_scoreboard if g.get("id") is not None}
+
+    # Remove any live-game drive records already present in /drives so they are
+    # not double-counted when we append the dedicated live endpoint's drives.
+    drive_id_fields = ("gameId", "game_id", "gameID")
+
+    def drive_game_id(d):
+        for field in drive_id_fields:
+            if d.get(field) is not None:
+                return str(d.get(field))
+        return None
+
+    updated_drives = [
+        d for d in drives_raw
+        if drive_game_id(d) not in live_ids
+    ]
+
+    live_metadata = []
+
+    for board_game in live_scoreboard:
+        game_id = board_game.get("id")
+        if game_id is None:
+            continue
+
+        gid = str(game_id)
+        home_info = board_game.get("homeTeam") or {}
+        away_info = board_game.get("awayTeam") or {}
+
+        home_team = home_info.get("name")
+        away_team = away_info.get("name")
+        home_points = home_info.get("points")
+        away_points = away_info.get("points")
+
+        if not home_team or not away_team:
+            continue
+
+        # Patch the /games record with the current live score. If the game is
+        # unexpectedly absent from /games, create the minimum record needed by
+        # the rating pipeline.
+        game_record = games_by_id.get(gid)
+        if game_record is None:
+            game_record = {
+                "id": game_id,
+                "homeTeam": home_team,
+                "awayTeam": away_team,
+                "homeConference": home_info.get("conference"),
+                "awayConference": away_info.get("conference"),
+                "homePoints": home_points,
+                "awayPoints": away_points,
+                "completed": False,
+            }
+            games.append(game_record)
+            games_by_id[gid] = game_record
+        else:
+            game_record["homeTeam"] = home_team
+            game_record["awayTeam"] = away_team
+            game_record["homeConference"] = (
+                home_info.get("conference") or game_record.get("homeConference")
+            )
+            game_record["awayConference"] = (
+                away_info.get("conference") or game_record.get("awayConference")
+            )
+            game_record["homePoints"] = home_points
+            game_record["awayPoints"] = away_points
+            game_record["completed"] = False
+
+        # Pull live play/drive data for this individual game.
+        live_game = get_json_optional(
+            f"https://api.collegefootballdata.com/live/plays?gameId={game_id}"
+        )
+
+        completed_drive_count = 0
+        if isinstance(live_game, dict):
+            for drive in live_game.get("drives") or []:
+                offense = drive.get("offense")
+                defense = drive.get("defense")
+                result = str(drive.get("result") or "").strip()
+
+                # Do not count a drive that is still in progress. A completed
+                # drive should have a result such as Punt, Touchdown, Field Goal,
+                # Turnover, End of Half, etc.
+                if not offense or not defense or not result:
+                    continue
+
+                updated_drives.append({
+                    "gameId": game_id,
+                    "offense": offense,
+                    "defense": defense,
+                })
+                completed_drive_count += 1
+
+        live_metadata.append({
+            "id": game_id,
+            "status": "in_progress",
+            "homeTeam": home_team,
+            "awayTeam": away_team,
+            "homePoints": home_points,
+            "awayPoints": away_points,
+            "period": board_game.get("period"),
+            "clock": board_game.get("clock"),
+            "completedDrives": completed_drive_count,
+        })
+
+    return games, updated_drives, live_metadata
+
+
 def get_points(games: list) -> pd.DataFrame:
     """Return each FBS team's total points scored and allowed in games against other FBS teams."""
     team_totals = {}
@@ -113,8 +291,12 @@ def get_points(games: list) -> pd.DataFrame:
         if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
             continue
 
-        home_pts = g.get("homePoints") or 0
-        away_pts = g.get("awayPoints") or 0
+        home_pts = g.get("homePoints")
+        away_pts = g.get("awayPoints")
+
+        # Ignore future/scheduled games that do not yet have a score.
+        if home_pts is None or away_pts is None:
+            continue
 
         if home:
             if home not in team_totals:
@@ -309,6 +491,11 @@ def add_record(ratings_df: pd.DataFrame, games: list) -> pd.DataFrame:
         home_pts = g.get("homePoints")
         away_pts = g.get("awayPoints")
         if home_pts is None or away_pts is None:
+            continue
+
+        # Live games can affect efficiency, but the record does not change until
+        # CFBD marks the game completed.
+        if g.get("completed") is False:
             continue
 
         games_played[home] += 1
@@ -602,12 +789,23 @@ def add_luck(df: pd.DataFrame) -> pd.DataFrame:
 #   9. Rename, order, sort, and export the final columns.
 def main():
     games_url = f"https://api.collegefootballdata.com/games?year={YEAR}&seasonType=both"
-    games = get_json(games_url)  # Load the season's games once for all subsequent calculations.
+    games = get_json(games_url)
+
+    drives_raw = get_json(
+        f"https://api.collegefootballdata.com/drives?year={YEAR}&seasonType=both"
+    )
+
+    # Live games are intentionally layered on top of the normal season data.
+    # Current scores + completed live drives affect efficiency, but W/L stays
+    # unchanged until the game becomes final.
+    live_scoreboard = get_live_scoreboard()
+    games, drives_raw, live_metadata = merge_live_games(
+        games, drives_raw, live_scoreboard
+    )
 
     points_df = get_points(games)
     fbs_teams = set(points_df["team"])
 
-    drives_raw = get_json(f"https://api.collegefootballdata.com/drives?year={YEAR}&seasonType=both")
     season_drives_df = aggregate_season_drives(drives_raw, fbs_teams)
     ratings_df = compute_ratings(points_df, season_drives_df)   # Calculate unadjusted efficiency ratings.
     ratings_df = add_record(ratings_df, games)                    # Add each team's FBS record and raw ranking.
@@ -721,7 +919,27 @@ def main():
     # float_format preserves trailing zeroes (for example 1.000 and 140.000).
     ratings_df.to_csv(outfile, index=False, float_format="%.3f")
 
+    # Publish a small companion JSON file used by index.html for the LIVE lights
+    # and "Last updated" timestamp.
+    live_file = os.path.join(data_dir, f"{YEAR} Live.json")
+    live_payload = {
+        "season": YEAR,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "liveGames": live_metadata,
+        "liveTeams": sorted({
+            team
+            for game in live_metadata
+            for team in (game.get("homeTeam"), game.get("awayTeam"))
+            if team
+        }),
+    }
+
+    with open(live_file, "w", encoding="utf-8") as f:
+        json.dump(live_payload, f, indent=2, ensure_ascii=False)
+
     print("Saved rankings to:", outfile)
+    print("Saved live metadata to:", live_file)
+    print(f"Live FBS games included: {len(live_metadata)}")
     print(ratings_df.head(15))
 
 
