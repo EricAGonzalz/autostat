@@ -1052,49 +1052,55 @@ def main():
     # The adjusted ranking is still preserved separately in AdjRk.
     ratings_df = ratings_df.sort_values("Rk", ascending=True).reset_index(drop=True)
 
-    # Keep calculated decimal fields numeric and force exactly three decimals
-    # in the exported CSV. This is done AFTER temporary live rows are added so
-    # blank live placeholders cannot convert these columns to object dtype.
+
+    # Force all calculated statistics to numeric values and round the actual
+    # DataFrame values to three decimal places before writing the CSV.
     decimal_columns = [
-        "NetRtg", "AdjRtg", "Win %", "PyW %",
-        "Luck", "Luck Z", "Ortg", "DRtg", "SOS",
+        "NetRtg",
+        "AdjRtg",
+        "Win %",
+        "PyW %",
+        "Luck",
+        "Luck Z",
+        "Ortg",
+        "DRtg",
+        "SOS",
     ]
-    decimal_columns = [c for c in decimal_columns if c in ratings_df.columns]
 
     for column in decimal_columns:
-        ratings_df[column] = pd.to_numeric(
-            ratings_df[column],
-            errors="coerce"
-        ).round(3)
+        if column in ratings_df.columns:
+            ratings_df[column] = pd.to_numeric(
+                ratings_df[column],
+                errors="coerce"
+            ).round(3)
 
-    # In GitHub Actions, GITHUB_WORKSPACE is the repository root. Locally,
-    # fall back to the directory containing this script.
-    repo_root = os.environ.get(
-        "GITHUB_WORKSPACE",
-        os.path.dirname(os.path.abspath(__file__))
-    )
-    data_dir = os.path.join(repo_root, "data")
-    os.makedirs(data_dir, exist_ok=True)
+    # Keep ranks, records, point totals, and drive counts as integer columns.
+    integer_columns = [
+        "Rk",
+        "W",
+        "L",
+        "AdjRk",
+        "PF",
+        "PA",
+        "ODrives",
+        "DDrives",
+        "SOS rank",
+    ]
 
-    # This filename matches the URLs already used by index.html/matchup.html:
-    # data/2026 Master.csv, data/2027 Master.csv, etc.
-    outfile = os.path.join(data_dir, f"{YEAR} Master.csv")
-
-    # Keep count/total fields integer-like where applicable.
-    for column in ["Rk", "W", "L", "AdjRk", "PF", "PA", "ODrives", "DDrives", "SOS rank"]:
+    for column in integer_columns:
         if column in ratings_df.columns:
             ratings_df[column] = pd.to_numeric(
                 ratings_df[column],
                 errors="coerce"
             ).astype("Int64")
 
-    # Decimal rating fields are exported with exactly three places.
+    # Write the already-rounded values. Blank placeholder cells remain blank.
     ratings_df.to_csv(
         outfile,
         index=False,
-        float_format="%.3f",
         na_rep=""
     )
+
 
     # Publish a small companion JSON file used by index.html for the LIVE lights
     # and "Last updated" timestamp.
