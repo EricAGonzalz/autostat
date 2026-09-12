@@ -1,4 +1,5 @@
 import os
+import argparse
 import time
 import json
 from datetime import datetime, timezone
@@ -974,6 +975,255 @@ def add_luck(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+
+def get_latest_completed_fbs_week(games: list):
+    """
+    Return the highest completed week number containing an FBS-vs-FBS game.
+    """
+    completed_weeks = []
+
+    for game in games:
+        if game.get("completed") is not True:
+            continue
+
+        home_conf = game.get("homeConference")
+        away_conf = game.get("awayConference")
+
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+
+        week = game.get("week")
+        if week is None:
+            continue
+
+        try:
+            completed_weeks.append(int(week))
+        except (TypeError, ValueError):
+            continue
+
+    return max(completed_weeks) if completed_weeks else None
+
+
+def archive_weekly_snapshot():
+    """
+    Archive the current Master.csv as the latest completed FBS week.
+
+    Automatically creates:
+        data/history/<YEAR>/Week XX.csv
+        data/<YEAR> History.csv
+
+    Re-running the same week replaces that week's rows instead of duplicating them.
+    """
+    data_dir = "data"
+    master_file = os.path.join(data_dir, f"{YEAR} Master.csv")
+
+    if not os.path.exists(master_file):
+        raise SystemExit(
+            f"Cannot archive because {master_file} does not exist. "
+            "Run the normal rankings update first."
+        )
+
+    games = get_json(
+        f"https://api.collegefootballdata.com/games?year={YEAR}&seasonType=both"
+    )
+
+    week = get_latest_completed_fbs_week(games)
+
+    if week is None:
+        raise SystemExit(
+            "No completed FBS-vs-FBS week could be identified for archiving."
+        )
+
+    history_dir = os.path.join(data_dir, "history", str(YEAR))
+    os.makedirs(history_dir, exist_ok=True)
+
+    weekly_file = os.path.join(history_dir, f"Week {week:02d}.csv")
+    history_file = os.path.join(data_dir, f"{YEAR} History.csv")
+
+    # Preserve the exact formatting already present in Master.csv.
+    snapshot = pd.read_csv(
+        master_file,
+        dtype=str,
+        keep_default_na=False
+    )
+
+    snapshot.insert(0, "Week", str(week))
+    snapshot.insert(0, "Season", str(YEAR))
+
+    snapshot.to_csv(weekly_file, index=False)
+
+    if os.path.exists(history_file):
+        history = pd.read_csv(
+            history_file,
+            dtype=str,
+            keep_default_na=False
+        )
+
+        if {"Season", "Week"}.issubset(history.columns):
+            history = history[
+                ~(
+                    (history["Season"].astype(str) == str(YEAR))
+                    & (history["Week"].astype(str) == str(week))
+                )
+            ].copy()
+
+        history = pd.concat([history, snapshot], ignore_index=True)
+    else:
+        history = snapshot.copy()
+
+    history["_week_num"] = pd.to_numeric(
+        history["Week"],
+        errors="coerce"
+    )
+
+    if "Rk" in history.columns:
+        history["_rk_num"] = pd.to_numeric(
+            history["Rk"],
+            errors="coerce"
+        )
+
+        history = history.sort_values(
+            ["Season", "_week_num", "_rk_num", "Team"],
+            na_position="last"
+        )
+
+        history = history.drop(columns=["_week_num", "_rk_num"])
+    else:
+        history = history.sort_values(
+            ["Season", "_week_num", "Team"],
+            na_position="last"
+        )
+
+        history = history.drop(columns=["_week_num"])
+
+    history.to_csv(history_file, index=False)
+
+    print(f"Archived completed Week {week}.")
+    print(f"Weekly snapshot: {weekly_file}")
+    print(f"Cumulative history: {history_file}")
+
+
+
+
+
+def build_schedule_csv(games: list, ratings_df: pd.DataFrame, data_dir: str):
+    """
+    Build a team-centric schedule file for the current season.
+
+    Each FBS-vs-FBS game is written twice:
+      - one row from the home team's perspective
+      - one row from the away team's perspective
+
+    Future games include the opponent's current ranking/AdjRtg when available.
+    Completed/live games remain in the file so team pages can show the full
+    season schedule and distinguish past, live, and future games.
+    """
+    current = ratings_df.copy()
+
+    # Coerce ranking metrics for safe lookups.
+    for column in ["Rk", "AdjRk", "AdjRtg", "NetRtg", "Ortg", "DRtg"]:
+        if column in current.columns:
+            current[column] = pd.to_numeric(current[column], errors="coerce")
+
+    current_idx = current.set_index("Team", drop=False)
+
+    rows = []
+
+    for game in games:
+        home = game.get("homeTeam")
+        away = game.get("awayTeam")
+        home_conf = game.get("homeConference")
+        away_conf = game.get("awayConference")
+
+        if not home or not away:
+            continue
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+
+        game_id = game.get("id")
+        week = game.get("week")
+        start_date = (
+            game.get("startDate")
+            or game.get("start_date")
+            or game.get("startTime")
+            or ""
+        )
+
+        completed = bool(game.get("completed") is True)
+        home_points = game.get("homePoints")
+        away_points = game.get("awayPoints")
+
+        # Determine live state from the patched game record.
+        is_live = bool(
+            game.get("completed") is False
+            and home_points is not None
+            and away_points is not None
+        )
+
+        for team, opponent, location, team_conf, opp_conf, team_pts, opp_pts in [
+            (home, away, "Home", home_conf, away_conf, home_points, away_points),
+            (away, home, "Away", away_conf, home_conf, away_points, home_points),
+        ]:
+            opp_row = current_idx.loc[opponent] if opponent in current_idx.index else None
+
+            result = ""
+            if completed and team_pts is not None and opp_pts is not None:
+                if float(team_pts) > float(opp_pts):
+                    result = "W"
+                elif float(team_pts) < float(opp_pts):
+                    result = "L"
+                else:
+                    result = "T"
+
+            rows.append({
+                "Season": YEAR,
+                "Week": week if week is not None else "",
+                "GameId": game_id if game_id is not None else "",
+                "Team": team,
+                "Conference": team_conf or "",
+                "Opponent": opponent,
+                "OpponentConference": opp_conf or "",
+                "Location": location,
+                "StartDate": start_date,
+                "Completed": completed,
+                "Live": is_live and not completed,
+                "TeamPoints": "" if team_pts is None else int(float(team_pts)),
+                "OpponentPoints": "" if opp_pts is None else int(float(opp_pts)),
+                "Result": result,
+                "OpponentRk": (
+                    "" if opp_row is None or pd.isna(opp_row.get("Rk"))
+                    else int(opp_row.get("Rk"))
+                ),
+                "OpponentAdjRk": (
+                    "" if opp_row is None or pd.isna(opp_row.get("AdjRk"))
+                    else int(opp_row.get("AdjRk"))
+                ),
+                "OpponentAdjRtg": (
+                    "" if opp_row is None or pd.isna(opp_row.get("AdjRtg"))
+                    else f"{float(opp_row.get('AdjRtg')):.3f}"
+                ),
+            })
+
+    schedule_df = pd.DataFrame(rows)
+
+    if not schedule_df.empty:
+        schedule_df["_week_num"] = pd.to_numeric(
+            schedule_df["Week"], errors="coerce"
+        )
+        schedule_df = schedule_df.sort_values(
+            ["Team", "_week_num", "StartDate", "Opponent"],
+            na_position="last"
+        ).drop(columns=["_week_num"])
+
+    schedule_file = os.path.join(data_dir, f"{YEAR} Schedule.csv")
+    schedule_df.to_csv(schedule_file, index=False)
+
+    print("Saved schedule to:", schedule_file)
+    return schedule_file
+
+
+
 # Run the complete ranking pipeline.
 #
 # The processing order is:
@@ -1158,6 +1408,10 @@ def main():
         na_rep=""
     )
 
+    # Build/update the current-season schedule file used by team pages.
+    build_schedule_csv(games, ratings_df, data_dir)
+
+
     # Publish a small companion JSON file used by index.html for the LIVE lights
     # and "Last updated" timestamp.
     live_file = os.path.join(data_dir, f"{YEAR} Live.json")
@@ -1183,4 +1437,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Calculate CFB efficiency rankings or archive the latest completed week."
+    )
+    parser.add_argument(
+        "--archive-week",
+        action="store_true",
+        help="Archive the current Master.csv as the latest completed FBS week."
+    )
+    args = parser.parse_args()
+
+    if args.archive_week:
+        archive_weekly_snapshot()
+    else:
+        main()
