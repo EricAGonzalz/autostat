@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Live/current rankings refresh every 10 minutes.
-    - cron: "3,13,23,33,43,53 * * * *"
+  # Live/current rankings refresh every 10 minutes.
+  - cron: "*/10 * * * *"
 
-    # Weekly archive: Monday at 10:07 UTC.
-    - cron: "7 /10 * * * *"
+  # Archive once per day at 10:07 UTC.
+  - cron: "7 10 * * *"
 
 permissions:
   contents: read
