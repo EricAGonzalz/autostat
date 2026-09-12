@@ -5,7 +5,7 @@ on:
 
   schedule:
     # Live/current rankings refresh every 15 minutes.
-    - cron: "*/15 * * * *"
+    - cron: "13,28,43,58 * * * *"
 
     # Weekly archive: Monday at 10:07 UTC.
     - cron: "7 10 * * 1"
@@ -29,6 +29,28 @@ jobs:
       - name: Check out private autostat repo
         uses: actions/checkout@v4
 
+      - name: Check out public rankings repo
+        uses: actions/checkout@v4
+        with:
+          repository: EricAGonzalz/CFBRankings
+          token: ${{ secrets.CFB_PUBLISH_TOKEN }}
+          path: public-repo
+
+      - name: Restore existing ranking history
+        shell: bash
+        run: |
+          mkdir -p "data/history/${CFB_YEAR}"
+
+          if [ -f "public-repo/data/${CFB_YEAR} History.csv" ]; then
+            cp "public-repo/data/${CFB_YEAR} History.csv" \
+               "data/${CFB_YEAR} History.csv"
+          fi
+
+          if [ -d "public-repo/data/history/${CFB_YEAR}" ]; then
+            cp -r "public-repo/data/history/${CFB_YEAR}/." \
+                  "data/history/${CFB_YEAR}/"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -46,29 +68,30 @@ jobs:
         if: github.event_name == 'schedule' && github.event.schedule == '7 10 * * 1'
         run: python autostat.py --archive-week
 
-      - name: Check out public rankings repo
-        uses: actions/checkout@v4
-        with:
-          repository: EricAGonzalz/CFBRankings
-          token: ${{ secrets.CFB_PUBLISH_TOKEN }}
-          path: public-repo
-
-      - name: Copy updated rankings, schedule, live metadata, and history
+      - name: Copy updated files to public repo
         shell: bash
         run: |
           mkdir -p "public-repo/data"
 
-          cp "data/${CFB_YEAR} Master.csv" "public-repo/data/${CFB_YEAR} Master.csv"
-          cp "data/${CFB_YEAR} Live.json" "public-repo/data/${CFB_YEAR} Live.json"
-          cp "data/${CFB_YEAR} Schedule.csv" "public-repo/data/${CFB_YEAR} Schedule.csv"
+          cp "data/${CFB_YEAR} Master.csv" \
+             "public-repo/data/${CFB_YEAR} Master.csv"
+
+          cp "data/${CFB_YEAR} Live.json" \
+             "public-repo/data/${CFB_YEAR} Live.json"
+
+          cp "data/${CFB_YEAR} Schedule.csv" \
+             "public-repo/data/${CFB_YEAR} Schedule.csv"
 
           if [ -f "data/${CFB_YEAR} History.csv" ]; then
-            cp "data/${CFB_YEAR} History.csv" "public-repo/data/${CFB_YEAR} History.csv"
+            cp "data/${CFB_YEAR} History.csv" \
+               "public-repo/data/${CFB_YEAR} History.csv"
           fi
 
           if [ -d "data/history/${CFB_YEAR}" ]; then
             mkdir -p "public-repo/data/history/${CFB_YEAR}"
-            cp -r "data/history/${CFB_YEAR}/." "public-repo/data/history/${CFB_YEAR}/"
+
+            cp -r "data/history/${CFB_YEAR}/." \
+                  "public-repo/data/history/${CFB_YEAR}/"
           fi
 
       - name: Commit and push updated files
