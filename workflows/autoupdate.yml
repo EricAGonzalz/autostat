@@ -1,18 +1,14 @@
 name: Update CFB Rankings
 
 on:
-  # Lets you run it manually from the Actions tab.
   workflow_dispatch:
 
-  # Automatic refresh. GitHub schedules use UTC.
-  # This requests an update every 15 minutes.
   schedule:
     - cron: "*/15 * * * *"
 
 permissions:
-  contents: write
+  contents: read
 
-# Prevent two update jobs from writing the rankings file at the same time.
 concurrency:
   group: cfb-rankings-update
   cancel-in-progress: true
@@ -26,16 +22,15 @@ jobs:
       CFB_YEAR: "2026"
 
     steps:
-      - name: Check out repository
+      - name: Check out private autostat repo
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install numpy pandas requests
@@ -43,15 +38,25 @@ jobs:
       - name: Recalculate rankings
         run: python autostat.py
 
-      - name: Commit updated rankings
-        shell: bash
+      - name: Check out public rankings repo
+        uses: actions/checkout@v4
+        with:
+          repository: EricAGonzalz/CFBRankings
+          token: ${{ secrets.CFB_PUBLISH_TOKEN }}
+          path: public-repo
+
+      - name: Copy updated rankings file
+        run: |
+          cp "data/${CFB_YEAR} Master.csv" "public-repo/data/${CFB_YEAR} Master.csv"
+
+      - name: Commit and push updated rankings
+        working-directory: public-repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add "data/${CFB_YEAR} Master.csv"
 
-          # Do nothing if the API data has not changed since the last run.
           if git diff --cached --quiet; then
             echo "No ranking changes to commit."
             exit 0
