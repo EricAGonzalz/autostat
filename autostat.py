@@ -104,6 +104,68 @@ def get_json(url: str, *, tries: int = 4, backoff: float = 0.6):
 # efficiency formulas. Games against non-FBS teams are excluded so large
 # mismatches do not artificially inflate a team's raw rating.
 
+
+def add_missing_live_teams(ratings_df: pd.DataFrame,
+                           live_metadata: list) -> pd.DataFrame:
+    """
+    Add only teams that are CURRENTLY playing an FBS-vs-FBS live game but are
+    not already present in the calculated rankings.
+
+    This is intended for teams that have not yet played a completed qualifying
+    FBS-vs-FBS game. They appear only while their live game is in progress.
+
+    If the live points/drives are sufficient to produce a normal calculated row,
+    this function does nothing for that team. Otherwise it adds a temporary row
+    with a 0-0 FBS record and blank rating fields so the team is visible.
+    """
+    if not live_metadata:
+        return ratings_df
+
+    existing = {
+        str(team).strip().lower()
+        for team in ratings_df["Team"].dropna()
+    }
+
+    rows = []
+
+    for game in live_metadata:
+        for team_name, conference in (
+            (game.get("homeTeam"), game.get("homeConference")),
+            (game.get("awayTeam"), game.get("awayConference")),
+        ):
+            if not team_name:
+                continue
+
+            key = str(team_name).strip().lower()
+            if key in existing:
+                continue
+
+            row = {column: pd.NA for column in ratings_df.columns}
+            row["Team"] = team_name
+            row["Conference"] = conference or ""
+            row["W"] = 0
+            row["L"] = 0
+
+            rows.append(row)
+            existing.add(key)
+
+    if not rows:
+        return ratings_df
+
+    live_only_df = pd.DataFrame(rows, columns=ratings_df.columns)
+
+    print(
+        f"Added {len(live_only_df)} live FBS team(s) that did not yet have "
+        "a qualifying rankings row."
+    )
+
+    return pd.concat(
+        [ratings_df, live_only_df],
+        ignore_index=True
+    )
+
+
+
 def get_json_optional(url: str):
     """
     Request JSON without terminating the rankings job if an optional live-data
@@ -350,6 +412,12 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
             "status": "in_progress",
             "homeTeam": home_team,
             "awayTeam": away_team,
+            "homeConference": (
+                home_obj.get("conference") if isinstance(home_obj, dict) else None
+            ),
+            "awayConference": (
+                away_obj.get("conference") if isinstance(away_obj, dict) else None
+            ),
             "homePoints": float(home_points),
             "awayPoints": float(away_points),
             "period": board_game.get("period"),
@@ -972,6 +1040,10 @@ def main():
     ]
     cols = [c for c in cols if c in ratings_df.columns]
     ratings_df = ratings_df[cols].copy()
+
+    # Only add teams currently playing an FBS-vs-FBS live game if they do
+    # not yet have a calculated rankings row.
+    ratings_df = add_missing_live_teams(ratings_df, live_metadata)
 
     # Sort the final table by raw Net Rating rank.
     #
