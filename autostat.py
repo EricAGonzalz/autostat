@@ -1,1771 +1,1453 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CFB Rankings</title>
-
-  <style>
-    :root{
-      --bg:#f4f4f4;
-      --card:#ffffff;
-      --text:#111;
-      --muted:#666;
-      --grid:#dddddd;
-
-      --head-bg:#0b0b0b;
-      --head-fg:#ffffff;
-
-      --chip:#f0f0f0;
-      --chip-border:#d6d6d6;
-
-      --row-alt:#fafafa;
-      --row-hover:#efefef;
-
-      /* Champion highlight */
-      --champ-bg:#fff7cc;
-      --champ-border:#d6b800;
-      --champ-text:#1a1a1a;
-
-      /* "KenPom-like" separators */
-      --divide:#bdbdbd;
-
-      /* Links */
-      --link:#0a58ca;
-      --link-hover:#eef5ff;
-    }
-
-    body{
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      margin: 20px;
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    .page{
-      max-width: 1300px;
-      margin: 0 auto;
-    }
-
-    .topbar{
-      background: var(--card);
-      border: 1px solid #cfcfcf;
-      border-top: 4px solid #111;
-      border-radius: 2px;
-      box-shadow: none;
-      padding: 14px 14px 10px 14px;
-    }
-
-    .brandrow{
-      display: flex;
-      gap: 12px;
-      align-items: baseline;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-
-    h1{
-      margin: 0;
-      font-size: 22px;
-      letter-spacing: 0.2px;
-    }
-
-    .subtitle{
-      margin: 6px 0 0 0;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.35;
-    }
-
-    .statusline{
-      margin: 8px 0 0 0;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.35;
-    }
-
-    .controls{
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid #e8e8e8;
-    }
-
-    .control{
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      background: var(--chip);
-      border: 1px solid var(--chip-border);
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 13px;
-    }
-
-    .control label{
-      color: #333;
-      white-space: nowrap;
-    }
-
-    .control input,
-    .control select{
-      border: 0;
-      background: transparent;
-      outline: none;
-      font-size: 13px;
-      min-width: 140px;
-    }
-
-    .control input::placeholder{
-      color: #888;
-    }
-
-    .links{
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .links a{
-      color: var(--link);
-      text-decoration: none;
-      padding: 2px 6px;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-
-    .links a:hover{
-      text-decoration: underline;
-      background: var(--link-hover);
-    }
-
-    .spacer{
-      flex: 1;
-    }
-
-    .header-link{
-      color: var(--link);
-      text-decoration: none;
-      padding: 6px 9px;
-      border-radius: 7px;
-      font-size: 13px;
-      white-space: nowrap;
-    }
-
-    .header-link:hover{
-      text-decoration: underline;
-      background: var(--link-hover);
-    }
-
-    #table-wrapper{
-      margin-top: 14px;
-      overflow-x: auto;
-      background: var(--card);
-      border: 1px solid #cfcfcf;
-      border-radius: 2px;
-      box-shadow: none;
-      padding: 10px;
-    }
-
-    table{
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 13px;
-    }
-
-    thead th{
-      position: sticky;
-      top: 0;
-      z-index: 3;
-      background: var(--head-bg);
-      color: var(--head-fg);
-      border: 1px solid #222;
-    }
-
-    thead tr.group th{
-      font-weight: 700;
-      font-size: 12px;
-      letter-spacing: 0.3px;
-      text-transform: none;
-      padding-top: 8px;
-      padding-bottom: 8px;
-    }
-
-    th, td{
-      padding: 6px 8px;
-      border: 1px solid var(--grid);
-      text-align: right;
-      vertical-align: middle;
-      white-space: nowrap; /* keeps headers aligned and icons on one line */
-    }
-
-    /* Left align "text columns" */
-    td.col-team, th.col-team,
-    td.col-conf, th.col-conf{
-      text-align: left;
-    }
-
-    tbody tr:nth-child(even){
-      background: var(--row-alt);
-    }
-
-    tbody tr:hover{
-      background: var(--row-hover);
-    }
-
-    /* KenPom-like vertical separators between column groups */
-    .divide-left{
-      border-left: 2px solid var(--divide) !important;
-    }
-
-    /* Sorting UI */
-    th.sortable{
-      cursor: pointer;
-      position: relative;
-      padding-right: 18px;
-      user-select: none;
-    }
-    th.sortable::after{
-      content: "↕";
-      position: absolute;
-      right: 6px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 0.75em;
-      opacity: 0.65;
-    }
-    th.sortable[data-sort="asc"]::after{ content:"▲"; opacity:0.95; }
-    th.sortable[data-sort="desc"]::after{ content:"▼"; opacity:0.95; }
-
-    /* Champion highlight */
-    tr.champion{
-      background: var(--champ-bg) !important;
-      color: var(--champ-text);
-      font-weight: 700;
-    }
-    tr.champion td{
-      border-color: #e7da7a;
-    }
-    tr.champion td:first-child{
-      border-left: 3px solid var(--champ-border);
-    }
-    .trophy{
-      margin-left: 6px;
-      font-size: 13px;
-      opacity: 0.95;
-    }
-
-    .note{
-      margin: 10px 2px 0 2px;
-      color: var(--muted);
-      font-size: 12.5px;
-      line-height: 1.35;
-      display: none;
-    }
-
-    .loading{
-      margin: 10px 2px 0 2px;
-      color: var(--muted);
-      font-size: 12.5px;
-      line-height: 1.35;
-      display: none;
-    }
-
-    .conference-menu{
-      position: relative;
-      display: inline-block;
-    }
+import os
+import argparse
+import time
+import json
+from datetime import datetime, timezone
+from collections import Counter
+
+import numpy as np
+import pandas as pd
+import requests
+
+# Conferences and historical conference labels treated as FBS.
+# A game is included in the ratings only when both teams belong to one of these
+# conferences. This keeps the data set limited to FBS-vs-FBS competition.
+FBS_CONFERENCES = {
+    "ACC", "Big Ten", "Big 12", "SEC", "Pac-12",
+    "American Athletic", "Mountain West", "Mid-American",
+    "Sun Belt", "Conference USA", "C-USA",
+    "FBS Independents", "Big East", "Pac-10", # "Western Athletic"
+}
+
+# Global settings used by the data-collection and rating calculations.
+# YEAR selects the season to analyze. API_KEY authenticates requests to the
+# CollegeFootballData API. TIMEOUT controls how long an API request may wait
+# before being treated as failed.
+# GitHub Actions can override the season with the CFB_YEAR environment variable.
+# Locally, this defaults to 2026 if CFB_YEAR is not set.
+YEAR = int(os.environ.get("CFB_YEAR", "2026"))
+
+# Never store the CollegeFootballData API key in source control.
+# In GitHub, create an Actions secret named CFBD_API_KEY.
+API_KEY = os.environ.get("CFBD_API_KEY")
+if not API_KEY:
+    raise SystemExit(
+        "Missing CFBD_API_KEY. Set it as an environment variable locally or "
+        "as a GitHub Actions repository secret."
+    )
+
+HEADERS = {
+    "Authorization": f"Bearer {API_KEY}",
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate",  # prevents brotli crash
+    "Connection": "keep-alive",
+}
+
+TIMEOUT = 30  # Maximum number of seconds allowed for a single API request before a timeout is raised.
+PYTHAG_EXP = 2.5  # Exponent x used in Pythagorean expectation: Off^x / (Off^x + Def^x).
+
+# Maximum scoring margin allowed to influence a single game's efficiency.
+#
+# If the actual score difference is larger than CAP_MARGIN, the winning team's
+# score is reduced so that:
+#
+#     capped_margin = min(actual_margin, CAP_MARGIN)
+#
+# Example:
+#     Actual score = 56-7, margin = 49
+#     CAP_MARGIN = 28
+#     Rating score becomes 35-7, margin = 28
+#
+# This prevents late-game scoring in extreme blowouts from dominating the
+# adjusted-efficiency model.
+CAP_MARGIN = 28
+
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
+
+
+# Request JSON data from the API with automatic retries.
+#
+# If a network, timeout, decoding, or HTTP error occurs, the request is retried
+# up to `tries` times. The waiting period grows after each failure:
+#
+#     delay = backoff * (attempt_number + 1)
+#
+# This creates a simple linear backoff so temporary API problems do not
+# immediately terminate the program.
+def get_json(url: str, *, tries: int = 4, backoff: float = 0.6):
+    last_err = None
+    for i in range(tries):
+        try:
+            resp = SESSION.get(url, timeout=TIMEOUT)
+            if not resp.ok:
+                msg = (resp.text or "")[:500]
+                raise requests.HTTPError(f"{resp.status_code} for {url}\n{msg}", response=resp)
+            return resp.json()
+        except (requests.exceptions.ContentDecodingError,
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.HTTPError) as e:
+            last_err = e
+            time.sleep(backoff * (i + 1))
+    raise SystemExit(f"Failed after {tries} tries: {last_err}")
+
+
+# Calculate season scoring totals for each FBS team.
+#
+# For every FBS-vs-FBS game:
+#     points_for     += points scored by the team
+#     points_against += points scored by the opponent
+#
+# These totals later become the numerators of the offensive and defensive
+# efficiency formulas. Games against non-FBS teams are excluded so large
+# mismatches do not artificially inflate a team's raw rating.
 
-    .conference-menu-button{
-      border: 0;
-      background: transparent;
-      color: var(--text);
-      font-size: 13px;
-      min-width: 140px;
-      text-align: left;
-      cursor: pointer;
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .conference-menu-button .caret{
-      font-size: 10px;
-      transition: transform 0.15s ease;
-    }
-
-    .conference-menu.open .conference-menu-button .caret{
-      transform: rotate(180deg);
-    }
-
-    .conference-menu-list{
-      display: none;
-      position: absolute;
-      left: 0;
-      top: calc(100% + 10px);
-      z-index: 30;
-      min-width: 230px;
-      max-height: 340px;
-      overflow-y: auto;
-      padding: 8px;
-      background: var(--card);
-      border: 1px solid var(--chip-border);
-      border-radius: 10px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.16);
-    }
-
-    .conference-menu.open .conference-menu-list{
-      display: block;
-    }
-
-    .conference-menu-actions{
-      display: flex;
-      gap: 6px;
-      padding-bottom: 7px;
-      margin-bottom: 5px;
-      border-bottom: 1px solid #e8e8e8;
-    }
-
-    .conference-menu-actions button{
-      border: 0;
-      background: var(--chip);
-      color: var(--text);
-      border-radius: 7px;
-      padding: 5px 8px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-
-    .conference-menu-actions button:hover{
-      background: var(--link-hover);
-    }
-
-    .conference-option{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 5px;
-      border-radius: 6px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-
-    .conference-option:hover{
-      background: var(--link-hover);
-    }
-
-    .conference-option input{
-      min-width: 0;
-      margin: 0;
-    }
-
-    .print-button{
-      border: 1px solid var(--chip-border);
-      background: var(--card);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 7px 14px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .print-button:hover{
-      background: var(--link-hover);
-    }
-
-    .publish-menu{
-      position: relative;
-      display: inline-block;
-    }
-
-    .publish-menu-button{
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .publish-menu-button .caret{
-      font-size: 10px;
-      transition: transform 0.15s ease;
-    }
-
-    .publish-menu.open .publish-menu-button .caret{
-      transform: rotate(180deg);
-    }
-
-    .publish-menu-list{
-      display: none;
-      position: absolute;
-      right: 0;
-      top: calc(100% + 6px);
-      z-index: 20;
-      min-width: 190px;
-      padding: 5px;
-      margin: 0;
-      list-style: none;
-      background: var(--card);
-      border: 1px solid var(--chip-border);
-      border-radius: 10px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.16);
-    }
-
-    .publish-menu.open .publish-menu-list{
-      display: block;
-    }
-
-    .publish-menu-list button{
-      width: 100%;
-      border: 0;
-      background: transparent;
-      color: var(--text);
-      text-align: left;
-      padding: 9px 10px;
-      border-radius: 7px;
-      font-size: 13px;
-      cursor: pointer;
-    }
-
-    .publish-menu-list button:hover{
-      background: var(--link-hover);
-    }
-
-    .png-export-stage{
-      position: fixed;
-      left: -20000px;
-      top: 0;
-      width: 1320px;
-      pointer-events: none;
-      z-index: -1;
-    }
-
-    .png-report-page{
-      box-sizing: border-box;
-      width: 1320px;
-      height: 1020px;
-      padding: 46px 48px 38px 48px;
-      background: #fff;
-      color: #000;
-      font-family: Arial, Helvetica, sans-serif;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .png-report-page .png-report-header{
-      margin-bottom: 14px;
-      padding-bottom: 10px;
-      border-bottom: 3px solid #111;
-    }
-
-    .png-report-page .png-report-header h1{
-      margin: 0;
-      font-size: 28px;
-      letter-spacing: 0.2px;
-    }
 
-    .png-report-page .png-report-season{
-      margin: 4px 0 0 0;
-      font-size: 17px;
-      font-weight: 700;
-    }
+def add_missing_live_teams(ratings_df: pd.DataFrame,
+                           live_metadata: list) -> pd.DataFrame:
+    """
+    Add only currently-live FBS teams that still do not have a calculated row.
 
-    .png-report-page .png-report-meta{
-      margin: 4px 0 0 0;
-      font-size: 12px;
-      color: #444;
-    }
+    Normally, canonicalizing the live names and drives causes these teams to be
+    calculated normally. This is only a fallback for the opening moments of a
+    game before enough completed drives exist to calculate efficiency.
+    """
+    if not live_metadata:
+        return ratings_df
 
-    .png-report-page table{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 11px;
+    existing = {
+        str(team).strip().lower()
+        for team in ratings_df["Team"].dropna()
     }
 
-    .png-report-page thead th{
-      position: static;
-      background: #111;
-      color: #fff;
-      border: 1px solid #222;
-    }
+    rows = []
 
-    .png-report-page th,
-    .png-report-page td{
-      padding: 4px 5px;
-      border: 1px solid #b9b9b9;
-      text-align: right;
-      white-space: nowrap;
-    }
+    for game in live_metadata:
+        for team_name, conference in (
+            (game.get("homeTeam"), game.get("homeConference")),
+            (game.get("awayTeam"), game.get("awayConference")),
+        ):
+            if not team_name:
+                continue
 
-    .png-report-page td.col-team,
-    .png-report-page th.col-team,
-    .png-report-page td.col-conf,
-    .png-report-page th.col-conf{
-      text-align: left;
-    }
+            key = str(team_name).strip().lower()
+            if key in existing:
+                continue
 
-    .png-report-page tbody tr:nth-child(even){
-      background: #f5f5f5;
-    }
+            # np.nan keeps numeric columns numeric, allowing float_format="%.3f"
+            # to work correctly when the CSV is written.
+            row = {column: np.nan for column in ratings_df.columns}
+            row["Team"] = team_name
+            row["Conference"] = conference or ""
+            row["W"] = 0
+            row["L"] = 0
 
-    .png-report-page tr.champion{
-      background: #fff2b3 !important;
-      font-weight: 700;
-    }
+            rows.append(row)
+            existing.add(key)
 
-    .png-report-page .png-report-footer{
-      margin-top: auto;
-      padding-top: 8px;
-      border-top: 1px solid #888;
-      display: flex;
-      justify-content: space-between;
-      gap: 20px;
-      font-size: 10px;
-      color: #444;
-    }
+    if not rows:
+        return ratings_df
 
-    .print-report-header,
-    .print-report-footer{
-      display: none;
-    }
+    live_only_df = pd.DataFrame(rows, columns=ratings_df.columns)
 
-    @media print{
-      @page{
-        size: landscape;
-        margin: 0.45in 0.4in 0.55in 0.4in;
-      }
-
-      body{
-        margin: 0;
-        background: #fff;
-        color: #000;
-        font-family: Arial, Helvetica, sans-serif;
-      }
-
-      .page{
-        max-width: none;
-      }
-
-      .team-link{
-        color: inherit !important;
-        text-decoration: none !important;
-      }
-
-      .topbar{
-        display: none !important;
-      }
-
-      .controls,
-      .links,
-      .print-button,
-      .publish-menu,
-      .loading,
-      .note{
-        display: none !important;
-      }
-
-      .print-report-header{
-        display: block !important;
-        margin: 0 0 12px 0;
-        padding-bottom: 8px;
-        border-bottom: 2px solid #111;
-      }
-
-      .print-report-header h1{
-        margin: 0;
-        font-size: 18pt;
-        letter-spacing: 0.2px;
-      }
-
-      .print-report-header .report-season{
-        margin: 3px 0 0 0;
-        font-size: 11pt;
-        font-weight: 700;
-      }
-
-      .print-report-header .report-meta{
-        margin: 3px 0 0 0;
-        font-size: 8.5pt;
-        color: #444;
-      }
-
-      #table-wrapper{
-        margin-top: 0;
-        overflow: visible;
-        box-shadow: none;
-        border-radius: 0;
-        padding: 0;
-      }
-
-      table{
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 7.5pt;
-      }
-
-      thead{
-        display: table-header-group;
-      }
-
-      thead th{
-        position: static;
-        background: #111 !important;
-        color: #fff !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-
-      th, td{
-        padding: 4px 5px;
-        border: 1px solid #b9b9b9;
-      }
-
-      tbody tr:nth-child(even){
-        background: #f5f5f5 !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-
-      tr.champion{
-        background: #fff2b3 !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-
-      tbody tr{
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-
-      .print-report-footer{
-        display: block !important;
-        margin-top: 8px;
-        padding-top: 6px;
-        border-top: 1px solid #888;
-        font-size: 7.5pt;
-        color: #444;
-      }
-    }
+    print(
+        f"Added {len(live_only_df)} temporary live team row(s) because "
+        "insufficient completed-drive data existed for a calculated rating."
+    )
 
-    @media (max-width: 720px){
-      body{ margin: 12px; }
-      .control input, .control select{ min-width: 120px; }
-    }
-  
-    .team-link{
-      color: var(--link);
-      text-decoration: none;
-      font-weight: 600;
-    }
+    return pd.concat([ratings_df, live_only_df], ignore_index=True)
 
-    .team-link:hover{
-      text-decoration: underline;
-      background: var(--link-hover);
-      border-radius: 4px;
-    }
 
-    .team-link:focus-visible{
-      outline: 2px solid var(--link);
-      outline-offset: 2px;
-      border-radius: 3px;
-    }
 
-    .live-dot{
-      display:inline-block;
-      width:8px;
-      height:8px;
-      margin-left:7px;
-      border-radius:50%;
-      background:#d71920;
-      box-shadow:0 0 0 2px rgba(215,25,32,.12);
-      vertical-align:middle;
-      animation:livePulse 1.5s ease-in-out infinite;
-    }
 
-    @keyframes livePulse{
-      0%,100%{ opacity:1; }
-      50%{ opacity:.38; }
-    }
+def get_fbs_team_id_map(year: int) -> dict:
+    """
+    Build a CFBD team-ID -> canonical school-name/conference map.
 
-    @media (prefers-reduced-motion: reduce){
-      .live-dot{ animation:none; }
-    }
+    This is used ONLY to normalize live scoreboard/play-by-play names. It does
+    not cause every FBS team to be added to the rankings.
+    """
+    teams = get_json(
+        f"https://api.collegefootballdata.com/teams/fbs?year={year}"
+    )
 
-  </style>
-</head>
-
-<body>
-  <div class="page">
-    <div class="topbar">
-      <div class="brandrow">
-        <div>
-          <h1 id="pageTitle">CFB Rankings</h1>
-          <p class="subtitle" id="pageSubtitle">Only FBS vs FBS games are used in calculations.</p>
-          <p class="statusline" id="statusLine"></p>
-        </div>
-
-        <div class="spacer"></div>
-
-        <a class="header-link" href="matchup.html">Matchup Predictor</a>
-
-        <div class="control" title="Choose a season to view">
-          <label for="yearSelect">Season</label>
-          <select id="yearSelect"></select>
-        </div>
-      </div>
-
-      <div class="controls">
-        <div class="control" title="Filter by team name">
-          <label for="teamSearch">Team</label>
-          <input id="teamSearch" type="text" placeholder="Search teams..." />
-        </div>
-
-        <div class="control" title="Filter by one or more conferences">
-          <label>Conf</label>
-          <div class="conference-menu" id="conferenceMenu">
-            <button id="conferenceMenuButton" class="conference-menu-button" type="button" aria-haspopup="true" aria-expanded="false">
-              <span id="conferenceMenuText">All conferences</span>
-              <span class="caret" aria-hidden="true">▼</span>
-            </button>
-            <div class="conference-menu-list" id="conferenceMenuList">
-              <div class="conference-menu-actions">
-                <button id="conferenceSelectAll" type="button">Select all</button>
-                <button id="conferenceClear" type="button">Clear</button>
-              </div>
-              <div id="conferenceOptions"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="control" title="Show only the top N teams by Rk">
-          <label for="topN">Filter</label>
-          <select id="topN">
-            <option value="0" selected>All</option>
-            <option value="25">Top 25</option>
-            <option value="50">Top 50</option>
-            <option value="100">Top 100</option>
-          </select>
-        </div>
-
-<div class="control" title="Quick toggle for row striping">
-  <label for="stripeToggle">Striping</label>
-  <select id="stripeToggle">
-    <option value="on" selected>On</option>
-    <option value="off">Off</option>
-  </select>
-</div>
-
-        <div class="publish-menu" id="publishMenu">
-          <button id="publishMenuButton" class="print-button publish-menu-button" type="button" aria-haspopup="true" aria-expanded="false" title="Publish the currently displayed rankings">
-            Publish
-            <span class="caret" aria-hidden="true">▼</span>
-          </button>
-          <div class="publish-menu-list" role="menu" aria-label="Publish options">
-            <button id="publishPdf" type="button" role="menuitem">Publish to PDF</button>
-            <button id="publishPng" type="button" role="menuitem">Publish PNGs as ZIP</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="links" id="finalLinks">
-        <span>Final Results:</span>
-        <!-- Year links are generated automatically -->
-      </div>
-    </div>
-
-    <section class="print-report-header" aria-hidden="true">
-      <h1>College Football Efficiency Rankings</h1>
-      <p class="report-season" id="printReportSeason"></p>
-      <p class="report-meta" id="printReportMeta"></p>
-    </section>
-
-    <div id="table-wrapper">
-      <table id="rankings">
-        <thead></thead>
-        <tbody></tbody>
-      </table>
-
-      <div class="loading" id="loadingLine">Loading…</div>
-      <div class="note" id="champNote"></div>
-    </div>
-
-    <footer class="print-report-footer" aria-hidden="true">
-      Rankings use FBS-vs-FBS games only. Generated from the CFB Rankings dataset for publication.
-    </footer>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script>
-    const DATA_DIR = "data";
-    const FIRST_SEASON = 2009;
-
-    // Set this to the "current live season" year (you can change once per season, or keep it automatic).
-    const CURRENT_SEASON = new Date().getFullYear();
-
-    // Default year to open if no ?year= is provided
-    const DEFAULT_YEAR = "2026";
-
-    // Optional: champions file. If missing, champion highlighting just won't happen.
-    const CHAMPIONS_JSON_URL = `${DATA_DIR}/champions.json`;
-
-    const RAW_BASE =
-      "https://raw.githubusercontent.com/EricAGonzalz/CFBRankings/main/data/";
-
-    function csvForYear(year) {
-      return `${RAW_BASE}${year}%20Master.csv`;
-    }
+    mapping = {}
+    for team in teams:
+        team_id = team.get("id")
+        school = team.get("school")
+        conference = team.get("conference")
 
-    // Column grouping (edit this mapping if your CSV headers change)
-    const GROUPS = [
-      { title: "Team", cols: ["Rk", "Team", "Conference", "W", "L"] },
-      { title: "Ratings", cols: ["NetRtg", "AdjRtg", "AdjRk"] },
-      { title: "Wins", cols: ["Win %", "PyW %", "Luck", "Luck Z"] },
-      { title: "Efficiency", cols: ["ORtg", "Ortg" , "DRtg"] },
-      { title: "Totals", cols: ["PF", "PA", "ODrives", "DDrives"] },
-      { title: "Schedule", cols: ["SOS", "SOSFac"] }
-    ];
-
-    // ---- Cached DOM references (avoids repeated getElementById lookups) ----
-    const els = {
-      pageTitle: document.getElementById("pageTitle"),
-      statusLine: document.getElementById("statusLine"),
-      yearSelect: document.getElementById("yearSelect"),
-      teamSearch: document.getElementById("teamSearch"),
-      conferenceMenu: document.getElementById("conferenceMenu"),
-      conferenceMenuButton: document.getElementById("conferenceMenuButton"),
-      conferenceMenuText: document.getElementById("conferenceMenuText"),
-      conferenceOptions: document.getElementById("conferenceOptions"),
-      conferenceSelectAll: document.getElementById("conferenceSelectAll"),
-      conferenceClear: document.getElementById("conferenceClear"),
-      topN: document.getElementById("topN"),
-      stripeToggle: document.getElementById("stripeToggle"),
-      publishMenu: document.getElementById("publishMenu"),
-      publishMenuButton: document.getElementById("publishMenuButton"),
-      publishPdf: document.getElementById("publishPdf"),
-      publishPng: document.getElementById("publishPng"),
-      printReportSeason: document.getElementById("printReportSeason"),
-      printReportMeta: document.getElementById("printReportMeta"),
-      finalLinks: document.getElementById("finalLinks"),
-      table: document.getElementById("rankings"),
-      loadingLine: document.getElementById("loadingLine"),
-      champNote: document.getElementById("champNote"),
-    };
-    els.thead = els.table.querySelector("thead");
-    els.tbody = els.table.querySelector("tbody");
-
-    // State
-    let CHAMPIONS_BY_YEAR = {};       // loaded from champions.json (if present)
-    let ACTIVE_YEAR = null;
-    let ACTIVE_CHAMPION = null;       // string team name, or null
-    let ACTIVE_CHAMPION_LC = null;    // lowercased, precomputed once per year
-    let ACTIVE_IS_FINAL = false;      // true if champion exists for that year
-    let AVAILABLE_YEARS = [];         // years to show in the season dropdown
-
-    // Companion live metadata written by autostat.py.
-    let LIVE_META = {
-      updatedAt: null,
-      liveGames: [],
-      liveTeams: new Set(),
-      gameByTeam: new Map()
-    };
-
-    let STATE = null; // replaces window.__CFB_STATE__
-
-    // Small debounce helper so typing in the search box doesn't re-render on every keystroke
-    function debounce(fn, wait) {
-      let t;
-      return (...args) => {
-        clearTimeout(t);
-        t = setTimeout(() => fn(...args), wait);
-      };
-    }
+        if team_id is None or not school:
+            continue
 
-    // Robust CSV parser (handles quoted commas, quotes, and CRLF/LF)
-    function parseCSV(text) {
-      const rows = [];
-      let row = [];
-      let cell = "";
-      let inQuotes = false;
-
-      for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
-        const next = text[i + 1];
-
-        if (ch === '"') {
-          if (inQuotes && next === '"') {
-            cell += '"';
-            i++;
-          } else {
-            inQuotes = !inQuotes;
-          }
-          continue;
+        mapping[str(team_id)] = {
+            "school": school,
+            "conference": conference or "",
         }
 
-        if (ch === "," && !inQuotes) {
-          row.push(cell);
-          cell = "";
-          continue;
-        }
+    return mapping
 
-        if ((ch === "\n" || ch === "\r") && !inQuotes) {
-          if (ch === "\r" && next === "\n") i++;
-          row.push(cell);
-          cell = "";
-          if (row.some(v => String(v).trim() !== "")) rows.push(row);
-          row = [];
-          continue;
-        }
 
-        cell += ch;
-      }
+def get_json_optional(url: str):
+    """
+    Request JSON without terminating the rankings job if an optional live-data
+    endpoint is unavailable. The completed-game rankings can still publish.
+    """
+    try:
+        resp = SESSION.get(url, timeout=TIMEOUT)
+        if not resp.ok:
+            print(f"Live-data request skipped: HTTP {resp.status_code} for {url}")
+            return None
+        return resp.json()
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        print(f"Live-data request skipped for {url}: {exc}")
+        return None
 
-      row.push(cell);
-      if (row.some(v => String(v).trim() !== "")) rows.push(row);
 
-      if (!rows.length) return { header: [], rows: [] };
-      return { header: rows[0].map(h => h.trim()), rows: rows.slice(1) };
+def get_live_scoreboard() -> list:
+    """
+    Return only FBS games currently in progress.
+
+    The scoreboard endpoint is used only for live state. If the user's CFBD
+    access tier does not include live data, this returns an empty list and the
+    script continues using completed games.
+    """
+    data = get_json_optional(
+        "https://api.collegefootballdata.com/scoreboard?classification=fbs"
+    )
+    if not isinstance(data, list):
+        return []
+
+    live_games = []
+    for game in data:
+        if str(game.get("status", "")).lower() != "in_progress":
+            continue
+
+        home = game.get("homeTeam") or {}
+        away = game.get("awayTeam") or {}
+
+        if str(home.get("classification", "")).lower() != "fbs":
+            continue
+        if str(away.get("classification", "")).lower() != "fbs":
+            continue
+
+        live_games.append(game)
+
+    return live_games
+
+
+def _extract_team_name(value):
+    """Return a team name whether CFBD gives us a string or a nested object."""
+    if isinstance(value, dict):
+        return value.get("name") or value.get("team") or value.get("school")
+    return value
+
+
+def _extract_team_points(value):
+    """Return current points whether the scoreboard uses a team object or flat fields."""
+    if isinstance(value, dict):
+        return value.get("points")
+    return None
+
+
+def _extract_team_name(value):
+    """Return a team name whether CFBD gives us a string or a nested object."""
+    if isinstance(value, dict):
+        return value.get("name") or value.get("team") or value.get("school")
+    return value
+
+
+def _extract_team_points(value):
+    """Return current points whether the scoreboard uses nested or flat fields."""
+    if isinstance(value, dict):
+        return value.get("points")
+    return None
+
+
+def merge_live_games(games: list,
+                     drives_raw: list,
+                     live_scoreboard: list,
+                     team_id_map: dict):
+    """
+    Overlay live FBS-vs-FBS data on top of completed season data.
+
+    Final/completed games remain untouched. A live game contributes its current
+    score and completed drives to the same season totals used for finished games.
+
+    Example:
+        completed season = 10 drives, 30 points
+        live game        =  4 drives, 14 points
+        current totals   = 14 drives, 44 points
+
+    W/L is still based only on completed games.
+    """
+    if not live_scoreboard:
+        return games, drives_raw, []
+
+    games_by_id = {
+        str(g.get("id")): g
+        for g in games
+        if g.get("id") is not None
     }
 
-    // Repair classic mojibake like "San JosÃ©" -> "San José" (display-only)
-    function fixMojibake(s) {
-      if (typeof s !== "string") return s;
-
-      // Only attempt on strings that look like classic UTF-8->Latin1 mojibake
-      if (!/[ÃÂâ€]/.test(s)) return s;
-
-      try {
-        const bytes = new Uint8Array([...s].map(ch => ch.charCodeAt(0) & 0xff));
-        const fixed = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-        if (fixed && fixed !== s) return fixed;
-      } catch {
-        // ignore
-      }
-      return s;
+    live_ids = {
+        str(g.get("id"))
+        for g in live_scoreboard
+        if g.get("id") is not None
     }
 
-    function indexByHeader(header) {
-      const map = new Map();
-      header.forEach((h, i) => map.set(h, i));
-      return map;
-    }
+    def drive_game_id(d):
+        for field in ("gameId", "game_id", "gameID"):
+            value = d.get(field)
+            if value is not None:
+                return str(value)
+        return None
 
-    function getSelectedConferences() {
-      return Array.from(els.conferenceOptions.querySelectorAll('input[type="checkbox"]:checked'))
-        .map(input => input.value);
-    }
+    # Keep every completed-game drive; remove only records for games that are
+    # currently live so the live endpoint cannot double-count them.
+    updated_drives = [
+        d for d in drives_raw
+        if drive_game_id(d) not in live_ids
+    ]
 
-    function updateConferenceMenuText() {
-      const selected = getSelectedConferences();
-      const total = els.conferenceOptions.querySelectorAll('input[type="checkbox"]').length;
+    live_metadata = []
 
-      if (!selected.length || selected.length === total) {
-        els.conferenceMenuText.textContent = "All conferences";
-      } else if (selected.length === 1) {
-        els.conferenceMenuText.textContent = selected[0];
-      } else {
-        els.conferenceMenuText.textContent = `${selected.length} conferences`;
-      }
-    }
+    for board_game in live_scoreboard:
+        game_id = board_game.get("id")
+        if game_id is None:
+            continue
 
-    function buildConferenceOptions(allRows, headerMap) {
-      const confIndex = headerMap.get("Conference");
-      els.conferenceOptions.innerHTML = "";
+        gid = str(game_id)
+        home_obj = board_game.get("homeTeam") or {}
+        away_obj = board_game.get("awayTeam") or {}
 
-      if (confIndex === undefined) {
-        updateConferenceMenuText();
-        return;
-      }
+        home_id = (
+            home_obj.get("id") if isinstance(home_obj, dict)
+            else board_game.get("homeId")
+        )
+        away_id = (
+            away_obj.get("id") if isinstance(away_obj, dict)
+            else board_game.get("awayId")
+        )
 
-      const set = new Set();
-      for (const r of allRows) {
-        const v = (r[confIndex] ?? "").trim();
-        if (v) set.add(v);
-      }
+        game_record = games_by_id.get(gid)
 
-      const frag = document.createDocumentFragment();
-      Array.from(set).sort().forEach(conf => {
-        const label = document.createElement("label");
-        label.className = "conference-option";
+        # Canonical names: /games first, then the team-ID directory, then
+        # scoreboard display name as a last resort.
+        home_team = game_record.get("homeTeam") if game_record else None
+        away_team = game_record.get("awayTeam") if game_record else None
 
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.value = conf;
-        checkbox.checked = true;
-        checkbox.addEventListener("change", () => {
-          updateConferenceMenuText();
-          renderBody();
-        });
+        if not home_team and home_id is not None:
+            home_team = team_id_map.get(str(home_id), {}).get("school")
+        if not away_team and away_id is not None:
+            away_team = team_id_map.get(str(away_id), {}).get("school")
 
-        const text = document.createElement("span");
-        text.textContent = conf;
+        home_team = home_team or _extract_team_name(home_obj)
+        away_team = away_team or _extract_team_name(away_obj)
 
-        label.appendChild(checkbox);
-        label.appendChild(text);
-        frag.appendChild(label);
-      });
-      els.conferenceOptions.appendChild(frag);
-      updateConferenceMenuText();
-    }
+        home_conf = game_record.get("homeConference") if game_record else None
+        away_conf = game_record.get("awayConference") if game_record else None
 
-    function getGroupBoundaryStarts(headerMap, orderedCols) {
-      const starts = new Set();
-      let running = 0;
-      let firstAdded = false;
+        if not home_conf and home_id is not None:
+            home_conf = team_id_map.get(str(home_id), {}).get("conference")
+        if not away_conf and away_id is not None:
+            away_conf = team_id_map.get(str(away_id), {}).get("conference")
 
-      for (const group of GROUPS) {
-        const existing = group.cols.filter(c => headerMap.has(c) && orderedCols.includes(c));
-        if (!existing.length) continue;
+        if not home_conf and isinstance(home_obj, dict):
+            home_conf = home_obj.get("conference")
+        if not away_conf and isinstance(away_obj, dict):
+            away_conf = away_obj.get("conference")
 
-        if (!firstAdded) firstAdded = true;
-        else starts.add(running);
+        home_points = _extract_team_points(home_obj)
+        away_points = _extract_team_points(away_obj)
 
-        running += existing.length;
-      }
+        if home_points is None:
+            home_points = board_game.get("homePoints")
+        if away_points is None:
+            away_points = board_game.get("awayPoints")
 
-      const groupedSet = new Set(GROUPS.flatMap(g => g.cols));
-      const leftovers = orderedCols.filter(c => !groupedSet.has(c) && headerMap.has(c));
-      if (leftovers.length && running > 0) starts.add(running);
+        if not home_team or not away_team:
+            print(f"Skipping live game {gid}: missing canonical team names")
+            continue
 
-      return starts;
-    }
+        if home_points is None or away_points is None:
+            print(f"Skipping live game {gid}: live score unavailable")
+            continue
 
-    function inferOrderedColumns(header) {
-      const inGroups = GROUPS.flatMap(g => g.cols).filter(c => header.includes(c));
-      const leftovers = header.filter(c => !inGroups.includes(c));
-      return [...inGroups, ...leftovers];
-    }
-
-    function buildGroupedHeader(thead, header, headerMap, orderedCols, boundaryStarts) {
-      const frag = document.createDocumentFragment();
-
-      const trGroup = document.createElement("tr");
-      trGroup.className = "group";
-
-      const trCols = document.createElement("tr");
-      let currentGroupStartIndex = 0;
-
-      for (const group of GROUPS) {
-        const existing = group.cols.filter(c => headerMap.has(c) && orderedCols.includes(c));
-        if (!existing.length) continue;
-
-        const th = document.createElement("th");
-        th.textContent = group.title;
-        th.colSpan = existing.length;
-
-        if (currentGroupStartIndex !== 0) th.classList.add("divide-left");
-
-        trGroup.appendChild(th);
-        currentGroupStartIndex += existing.length;
-      }
-
-      const groupedSet = new Set(GROUPS.flatMap(g => g.cols));
-      const leftovers = orderedCols.filter(c => !groupedSet.has(c) && headerMap.has(c));
-      if (leftovers.length) {
-        const th = document.createElement("th");
-        th.textContent = "Other";
-        th.colSpan = leftovers.length;
-        th.classList.add("divide-left");
-        trGroup.appendChild(th);
-      }
-
-      orderedCols.forEach((col, idx) => {
-        if (!headerMap.has(col)) return;
-
-        const th = document.createElement("th");
-        th.textContent = col;
-        th.classList.add("sortable");
-        th.dataset.index = String(idx);
-        th.dataset.sort = "none";
-
-        if (col === "Team") th.classList.add("col-team");
-        if (col === "Conference") th.classList.add("col-conf");
-
-        if (boundaryStarts.has(idx)) th.classList.add("divide-left");
-
-        trCols.appendChild(th);
-      });
-
-      frag.appendChild(trGroup);
-      frag.appendChild(trCols);
-      thead.innerHTML = "";
-      thead.appendChild(frag);
-    }
-
-    function buildTable(header, allRows) {
-      const thead = els.thead;
-      const tbody = els.tbody;
-
-      tbody.innerHTML = "";
-
-      const headerMap = indexByHeader(header);
-      const orderedCols = inferOrderedColumns(header);
-      const boundaryStarts = getGroupBoundaryStarts(headerMap, orderedCols);
-
-      buildConferenceOptions(allRows, headerMap);
-      buildGroupedHeader(thead, header, headerMap, orderedCols, boundaryStarts);
-
-      const rendered = [];
-      for (const raw of allRows) {
-        if (!raw.some(v => String(v ?? "").trim() !== "")) continue;
-
-        const cells = new Array(orderedCols.length);
-        for (let i = 0; i < orderedCols.length; i++) {
-          const idx = headerMap.get(orderedCols[i]);
-          cells[i] = idx === undefined ? "" : (raw[idx] ?? "");
-        }
-
-        rendered.push(cells);
-      }
-
-      // Precompute everything renderBody() needs so it never has to recompute
-      // per-call (boundary positions, column indices, etc.) — these are fixed
-      // for the lifetime of this table/season.
-      STATE = {
-        header,
-        headerMap,
-        orderedCols,
-        boundaryStarts,
-        teamCol: orderedCols.indexOf("Team"),
-        confCol: orderedCols.indexOf("Conference"),
-        rkCol: orderedCols.indexOf("Rk"),
-        rows: rendered
-      };
-
-      renderBody();
-      makeSortable(thead);
-    }
-
-    function renderBody() {
-      const tbody = els.tbody;
-      if (!STATE) {
-        tbody.innerHTML = "";
-        return;
-      }
-
-      const teamSearches = els.teamSearch.value
-        .toLowerCase()
-        .split(/[,;\n]+/)
-        .map(team => team.trim())
-        .filter(Boolean);
-
-      const selectedConferences = getSelectedConferences();
-      const conferenceOptionCount = els.conferenceOptions.querySelectorAll('input[type="checkbox"]').length;
-      const topN = Number(els.topN.value || 0);
-
-      const { teamCol, confCol, rkCol, boundaryStarts, orderedCols } = STATE;
-
-      let filtered = STATE.rows;
-
-      if (teamSearches.length && teamCol >= 0) {
-        filtered = filtered.filter(r => {
-          const teamName = String(r[teamCol] ?? "").toLowerCase();
-          return teamSearches.some(search => teamName.includes(search));
-        });
-      }
-
-      if (confCol >= 0 && selectedConferences.length > 0 && selectedConferences.length < conferenceOptionCount) {
-        const selectedSet = new Set(selectedConferences);
-        filtered = filtered.filter(r => selectedSet.has(String(r[confCol] ?? "")));
-      } else if (confCol >= 0 && conferenceOptionCount > 0 && selectedConferences.length === 0) {
-        filtered = [];
-      }
-
-      if (topN > 0 && rkCol >= 0) {
-        filtered = filtered.filter(r => {
-          const n = Number(String(r[rkCol] ?? "").trim());
-          return Number.isFinite(n) && n <= topN;
-        });
-      }
-
-      const frag = document.createDocumentFragment();
-
-      for (const cells of filtered) {
-        const tr = document.createElement("tr");
-
-        // Champion highlight: only if this season is final and champion is set
-        let isChampion = false;
-        if (ACTIVE_IS_FINAL && ACTIVE_CHAMPION_LC && teamCol >= 0) {
-          const teamName = String(cells[teamCol] ?? "").trim().toLowerCase();
-          if (teamName === ACTIVE_CHAMPION_LC) {
-            tr.classList.add("champion");
-            isChampion = true;
-          }
-        }
-
-        for (let idx = 0; idx < cells.length; idx++) {
-          const td = document.createElement("td");
-          const fixed = fixMojibake(cells[idx]);
-
-          const colName = orderedCols[idx];
-          if (colName === "Team") td.classList.add("col-team");
-          if (colName === "Conference") td.classList.add("col-conf");
-          if (boundaryStarts.has(idx)) td.classList.add("divide-left");
-
-          // Team names link to a single reusable team page. The selected
-          // season is included so historical seasons can open the same page.
-          if (colName === "Team" && String(fixed ?? "").trim()) {
-            const teamLink = document.createElement("a");
-            teamLink.className = "team-link";
-            teamLink.textContent = fixed;
-            teamLink.href =
-              `team.html?team=${encodeURIComponent(String(fixed).trim())}` +
-              `&year=${encodeURIComponent(String(ACTIVE_YEAR || DEFAULT_YEAR))}`;
-            teamLink.title = `View ${fixed} team profile`;
-            td.appendChild(teamLink);
-          } else {
-            td.textContent = fixed;
-          }
-
-          // ESPN-style live light beside teams currently playing.
-          if (colName === "Team") {
-            const teamKey = String(fixed ?? "").trim().toLowerCase();
-            if (LIVE_META.liveTeams.has(teamKey)) {
-              const dot = document.createElement("span");
-              dot.className = "live-dot";
-              dot.title = buildLiveTooltip(fixed);
-              dot.setAttribute("aria-label", "Live game in progress");
-              td.appendChild(dot);
+        # Add the live game to the season game list if /games does not already
+        # contain it. This is what lets a team with no previous FBS game appear
+        # and receive live PF/PA.
+        if game_record is None:
+            game_record = {
+                "id": game_id,
+                "homeTeam": home_team,
+                "awayTeam": away_team,
+                "homeConference": home_conf,
+                "awayConference": away_conf,
             }
-          }
+            games.append(game_record)
+            games_by_id[gid] = game_record
 
-          // Trophy for champion team
-          if (colName === "Team" && isChampion) {
-            const span = document.createElement("span");
-            span.className = "trophy";
-            span.textContent = "🏆";
-            td.appendChild(span);
-          }
+        game_record["homeTeam"] = home_team
+        game_record["awayTeam"] = away_team
+        game_record["homeConference"] = home_conf
+        game_record["awayConference"] = away_conf
+        game_record["homePoints"] = float(home_points)
+        game_record["awayPoints"] = float(away_points)
+        game_record["completed"] = False
 
-          tr.appendChild(td);
-        }
+        # ID map for live drive attribution.
+        live_team_names = {}
+        if home_id is not None:
+            live_team_names[str(home_id)] = home_team
+        if away_id is not None:
+            live_team_names[str(away_id)] = away_team
 
-        frag.appendChild(tr);
-      }
+        live_game = get_json_optional(
+            f"https://api.collegefootballdata.com/live/plays?gameId={game_id}"
+        )
 
-      tbody.innerHTML = "";
-      tbody.appendChild(frag);
+        completed_drives = 0
+        team_live_drives = Counter()
+
+        if isinstance(live_game, dict):
+            for drive in (live_game.get("drives") or []):
+                offense_id = drive.get("offenseId")
+                defense_id = drive.get("defenseId")
+
+                offense = (
+                    live_team_names.get(str(offense_id))
+                    if offense_id is not None else None
+                )
+                defense = (
+                    live_team_names.get(str(defense_id))
+                    if defense_id is not None else None
+                )
+
+                # If drive IDs are present but not on the scoreboard object,
+                # fall back to the FBS team directory.
+                if not offense and offense_id is not None:
+                    offense = team_id_map.get(str(offense_id), {}).get("school")
+                if not defense and defense_id is not None:
+                    defense = team_id_map.get(str(defense_id), {}).get("school")
+
+                offense = offense or _extract_team_name(drive.get("offense"))
+                defense = defense or _extract_team_name(drive.get("defense"))
+
+                result = drive.get("result")
+
+                # Only completed drives affect efficiency.
+                if not offense or not defense or not result:
+                    continue
+
+                updated_drives.append({
+                    "gameId": game_id,
+                    "offense": offense,
+                    "defense": defense,
+                })
+
+                team_live_drives[offense] += 1
+                completed_drives += 1
+
+        print(
+            f"LIVE INCLUDED: {away_team} {away_points} - "
+            f"{home_team} {home_points} | "
+            f"{away_team} drives={team_live_drives[away_team]}, "
+            f"{home_team} drives={team_live_drives[home_team]}"
+        )
+
+        live_metadata.append({
+            "id": game_id,
+            "status": "in_progress",
+            "homeTeam": home_team,
+            "awayTeam": away_team,
+            "homeConference": home_conf,
+            "awayConference": away_conf,
+            "homePoints": float(home_points),
+            "awayPoints": float(away_points),
+            "period": board_game.get("period"),
+            "clock": board_game.get("clock"),
+            "completedDrives": completed_drives,
+            "homeOffensiveDrives": team_live_drives[home_team],
+            "awayOffensiveDrives": team_live_drives[away_team],
+        })
+
+    return games, updated_drives, live_metadata
+
+
+
+def get_points(games: list) -> pd.DataFrame:
+    """Return each FBS team's total points scored and allowed in games against other FBS teams."""
+    team_totals = {}
+    for g in games:
+        home = g.get("homeTeam")
+        away = g.get("awayTeam")
+        home_conf = g.get("homeConference")
+        away_conf = g.get("awayConference")
+
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+
+        home_pts = g.get("homePoints")
+        away_pts = g.get("awayPoints")
+
+        # Ignore future/scheduled games that do not yet have a score.
+        if home_pts is None or away_pts is None:
+            continue
+
+        if home:
+            if home not in team_totals:
+                team_totals[home] = {
+                    "team": home, "conference": home_conf,
+                    "points_for": 0.0, "points_against": 0.0,
+                }
+            team_totals[home]["points_for"] += float(home_pts)
+            team_totals[home]["points_against"] += float(away_pts)
+
+        if away:
+            if away not in team_totals:
+                team_totals[away] = {
+                    "team": away, "conference": away_conf,
+                    "points_for": 0.0, "points_against": 0.0,
+                }
+            team_totals[away]["points_for"] += float(away_pts)
+            team_totals[away]["points_against"] += float(home_pts)
+
+    df = pd.DataFrame(team_totals.values())
+    print("points_df shape (ALL):", df.shape)
+    df = df[df["conference"].isin(FBS_CONFERENCES)].reset_index(drop=True)
+    print("points_df shape (FBS ONLY):", df.shape)
+    return df
+
+
+# Retrieve and organize drive data.
+#
+# Drives are used as the possession unit for the efficiency model. Instead of
+# measuring scoring per game, the model measures scoring per 100 drives, which
+# better accounts for differences in pace and number of possessions.
+def get_drives_raw(year: int) -> list:
+    url = f"https://api.collegefootballdata.com/drives?year={year}&seasonType=both"
+    return get_json(url)
+
+
+def aggregate_season_drives(drives_raw: list, fbs_teams: set) -> pd.DataFrame:
+    """
+    Count each team's offensive and defensive drives across FBS-vs-FBS games.
+
+    For each drive:
+        off_drives[offense] += 1
+        def_drives[defense] += 1
+
+    These season totals are later used in:
+
+        Offensive Rating = 100 * Points For / Offensive Drives
+        Defensive Rating = 100 * Points Against / Defensive Drives
+
+    Multiplying by 100 expresses both values as points per 100 drives.
+    """
+    off_counts = Counter()
+    def_counts = Counter()
+
+    for d in drives_raw:
+        off = d.get("offense")
+        deff = d.get("defense")
+        if off not in fbs_teams or deff not in fbs_teams:
+            continue
+        if off:
+            off_counts[off] += 1
+        if deff:
+            def_counts[deff] += 1
+
+    rows = []
+    all_teams = set(off_counts) | set(def_counts)
+    for team in all_teams:
+        rows.append({"team": team, "off_drives": off_counts[team], "def_drives": def_counts[team]})
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        raise SystemExit(
+            "aggregate_season_drives: no drives matched the FBS team-name filter. "
+            "Check that team names from /drives match team names from /games."
+        )
+    print("season drives_df shape:", df.shape)
+    return df
+
+
+def aggregate_game_drives(drives_raw: list, fbs_teams: set) -> dict:
+    """
+    Count offensive and defensive drives for every team in every individual game.
+
+    The dictionary key is:
+
+        (game_id, team)
+
+    and the stored value is:
+
+        {"off": offensive_drives, "def": defensive_drives}
+
+    Per-game drive counts are required because the adjusted model calculates
+    game-level efficiencies before adjusting them for opponent strength.
+
+    The API's game-ID field may use different names, so the function checks
+    several possible field names and stops with an error if none are present.
+    """
+    candidates = ["gameId", "game_id", "gameID"]
+    game_id_field = None
+    for c in candidates:
+        if drives_raw and c in drives_raw[0]:
+            game_id_field = c
+            break
+    if game_id_field is None:
+        sample_keys = sorted(drives_raw[0].keys()) if drives_raw else []
+        raise SystemExit(
+            "aggregate_game_drives: couldn't find a game-id field on /drives records "
+            f"(tried {candidates}). Fields actually present on a sample record: {sample_keys}. "
+            "Add the correct field name to `candidates` in aggregate_game_drives() and rerun."
+        )
+    print(f"aggregate_game_drives: using '{game_id_field}' as the game-id field")
+
+    counts = {}
+    for d in drives_raw:
+        off = d.get("offense")
+        deff = d.get("defense")
+        gid = d.get(game_id_field)
+        if gid is None:
+            continue
+        gid = str(gid)
+        if off in fbs_teams:
+            key = (gid, off)
+            counts.setdefault(key, {"off": 0, "def": 0})
+            counts[key]["off"] += 1
+        if deff in fbs_teams:
+            key = (gid, deff)
+            counts.setdefault(key, {"off": 0, "def": 0})
+            counts[key]["def"] += 1
+    return counts
+
+
+# Calculate raw offensive, defensive, and net efficiency.
+#
+# Offensive Rating:
+#
+#     Ortg = 100 * Points For / Offensive Drives
+#
+# This is the number of points a team scores per 100 offensive drives.
+#
+# Defensive Rating:
+#
+#     DRtg = 100 * Points Against / Defensive Drives
+#
+# This is the number of points a team allows per 100 defensive drives.
+# Lower defensive ratings are better.
+#
+# Net Rating:
+#
+#     Net Rating = Ortg - DRtg
+#
+# A positive value means the team scores more points per 100 drives than it
+# allows. A larger positive value therefore represents stronger performance.
+def compute_ratings(points_df: pd.DataFrame, drives_df: pd.DataFrame) -> pd.DataFrame:
+    merged = points_df.merge(drives_df, on="team", how="inner")
+    merged = merged[(merged["off_drives"] > 0) & (merged["def_drives"] > 0)].copy()
+    print("merged shape (FBS only):", merged.shape)
+
+    merged["off_rating"] = 100 * merged["points_for"] / merged["off_drives"]
+    merged["def_rating"] = 100 * merged["points_against"] / merged["def_drives"]
+    merged["net_rating"] = merged["off_rating"] - merged["def_rating"]
+
+    merged = merged[[
+        "team", "conference", "net_rating", "off_rating", "def_rating",
+        "points_for", "points_against", "off_drives", "def_drives"
+    ]]
+    return merged.sort_values("net_rating", ascending=False).reset_index(drop=True)
+
+
+# Calculate each team's FBS record and raw Net Rating rank.
+#
+# Winning percentage is:
+#
+#     Win % = Wins / Games Played
+#
+# Ties are not added to either the win or loss counters in this implementation.
+# Net Rank is then calculated by sorting Net Rating from highest to lowest,
+# because a larger offensive-minus-defensive efficiency margin is better.
+def add_record(ratings_df: pd.DataFrame, games: list) -> pd.DataFrame:
+    wins = Counter()
+    losses = Counter()
+    games_played = Counter()
+
+    for g in games:
+        home = g.get("homeTeam")
+        away = g.get("awayTeam")
+        home_conf = g.get("homeConference")
+        away_conf = g.get("awayConference")
+        if not home or not away:
+            continue
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+        home_pts = g.get("homePoints")
+        away_pts = g.get("awayPoints")
+        if home_pts is None or away_pts is None:
+            continue
+
+        # Live games can affect efficiency, but the record does not change until
+        # CFBD marks the game completed.
+        if g.get("completed") is False:
+            continue
+
+        games_played[home] += 1
+        games_played[away] += 1
+        if home_pts > away_pts:
+            wins[home] += 1
+            losses[away] += 1
+        elif away_pts > home_pts:
+            wins[away] += 1
+            losses[home] += 1
+
+    win_pct_map = {t: (wins[t] / gp if gp > 0 else 0.0) for t, gp in games_played.items()}
+    record_df = pd.DataFrame([
+        {"team": t, "wins": wins.get(t, 0), "losses": losses.get(t, 0), "win_pct": win_pct_map.get(t, 0.0)}
+        for t in ratings_df["team"]
+    ])
+
+    out = ratings_df.merge(record_df, on="team", how="left")
+    out["Net Rank"] = out["net_rating"].rank(ascending=False, method="min").astype("Int64")
+    out = out.rename(columns={
+        "team": "Team", "conference": "Conference", "net_rating": "Net Rating",
+        "wins": "Wins", "losses": "Losses",
+    })
+    return out
+
+
+# Convert each game into offensive and defensive efficiency observations.
+#
+# For the home team:
+#
+#     Game Offensive Rating = 100 * Capped Home Points / Home Offensive Drives
+#     Game Defensive Rating = 100 * Capped Away Points / Home Defensive Drives
+#
+# The same calculation is then performed from the away team's perspective.
+#
+# These game-level observations become the inputs to the schedule-adjusted
+# rating system rather than relying only on season totals.
+def apply_cap(home_pts: float, away_pts: float, cap: float):
+    """
+    Reduce scoring margins larger than `cap` while preserving the winner.
+
+    Let:
+
+        diff = home_points - away_points
+
+    If diff > cap:
+        adjusted_home = away_points + cap
+
+    If diff < -cap:
+        adjusted_away = home_points + cap
+
+    Otherwise the score is unchanged.
+
+    Only the margin used by the efficiency calculation changes; the actual game
+    result and win/loss record are not modified.
+    """
+    diff = home_pts - away_pts
+    if diff > cap:
+        return away_pts + cap, away_pts
+    if diff < -cap:
+        return home_pts, home_pts + cap
+    return home_pts, away_pts
+
+
+def build_game_efficiency(games: list, game_drive_counts: dict, fbs_teams: set, cap_margin: float) -> pd.DataFrame:
+    rows = []
+    skipped_missing_drives = 0
+
+    for g in games:
+        home = g.get("homeTeam")
+        away = g.get("awayTeam")
+        home_conf = g.get("homeConference")
+        away_conf = g.get("awayConference")
+        if home not in fbs_teams or away not in fbs_teams:
+            continue
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+
+        home_pts = g.get("homePoints")
+        away_pts = g.get("awayPoints")
+        if home_pts is None or away_pts is None:
+            continue
+
+        game_id = g.get("id")
+        if game_id is None:
+            continue
+        gid = str(game_id)
+
+        home_off = game_drive_counts.get((gid, home), {}).get("off", 0)
+        home_def = game_drive_counts.get((gid, home), {}).get("def", 0)
+        away_off = game_drive_counts.get((gid, away), {}).get("off", 0)
+        away_def = game_drive_counts.get((gid, away), {}).get("def", 0)
+
+        if not (home_off and home_def and away_off and away_def):
+            skipped_missing_drives += 1
+            continue
+
+        capped_home_pts, capped_away_pts = apply_cap(home_pts, away_pts, cap_margin)
+
+        rows.append({
+            "team": home, "opponent": away,
+            "off_rating": 100 * capped_home_pts / home_off,
+            "def_rating": 100 * capped_away_pts / home_def,
+        })
+        rows.append({
+            "team": away, "opponent": home,
+            "off_rating": 100 * capped_away_pts / away_off,
+            "def_rating": 100 * capped_home_pts / away_def,
+        })
+
+    df = pd.DataFrame(rows)
+    print(f"game_efficiency rows: {len(df)} (skipped {skipped_missing_drives} games missing per-game drive data)")
+    if df.empty:
+        raise SystemExit(
+            "build_game_efficiency: no game-level rows produced. Check the game-id "
+            "matching between /games and /drives in aggregate_game_drives()."
+        )
+    return df
+
+
+# Solve schedule-adjusted offensive and defensive efficiencies.
+#
+# Raw efficiency does not account for opponent quality. A team scoring well
+# against elite defenses should receive more credit than a team scoring the
+# same amount against weak defenses. The adjusted model corrects for this by
+# linking every team's rating to the ratings of its opponents.
+def solve_adjusted_efficiency(game_eff_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Solve the mutually dependent adjusted offensive and defensive ratings.
+
+    For team i:
+
+        AdjO_i = AvgRawOff_i - AvgOpponentAdjD_i + LeagueAvg
+
+        AdjD_i = AvgRawDef_i - AvgOpponentAdjO_i + LeagueAvg
+
+    Interpretation:
+
+    - AdjO asks how efficiently the team scored after accounting for the
+      defensive quality of the opponents it faced.
+    - AdjD asks how efficiently the team defended after accounting for the
+      offensive quality of the opponents it faced.
+
+    Because AdjO depends on opponents' AdjD values and AdjD depends on opponents'
+    AdjO values, every team's rating depends on every connected opponent. The
+    equations therefore form one simultaneous linear system:
+
+        Mx = b
+
+    where:
+        M = coefficient matrix containing team/opponent relationships
+        x = unknown AdjO and AdjD values
+        b = observed raw efficiencies shifted by league average
+
+    The program first attempts an exact solution with np.linalg.solve(). If the
+    matrix is singular or nearly dependent, least-squares is used instead.
+
+    After solving, AdjO and AdjD are recentered so their league means equal the
+    league-average raw efficiency.
+
+    Adjusted Efficiency Margin is:
+
+        AdjEM = AdjO - AdjD
+
+    A positive AdjEM means the team performs above an average FBS team after
+    opponent strength is taken into account.
+    """
+    if game_eff_df.empty:
+        raise SystemExit("solve_adjusted_efficiency: no game-level efficiency rows to solve with.")
+
+    teams = sorted(game_eff_df["team"].unique())
+    n = len(teams)
+    idx = {t: i for i, t in enumerate(teams)}
+
+    k = game_eff_df.groupby("team").size()
+    avg_off = game_eff_df.groupby("team")["off_rating"].mean()
+    avg_def = game_eff_df.groupby("team")["def_rating"].mean()
+    league_avg = pd.concat([game_eff_df["off_rating"], game_eff_df["def_rating"]]).mean()
+
+    M = np.zeros((2 * n, 2 * n))
+    b = np.zeros(2 * n)
+
+    for i, team in enumerate(teams):
+        M[i, i] = 1.0
+        b[i] = avg_off.get(team, league_avg) + league_avg
+        M[n + i, n + i] = 1.0
+        b[n + i] = avg_def.get(team, league_avg) + league_avg
+
+    for team, group in game_eff_df.groupby("team"):
+        i = idx[team]
+        ki = k[team]
+        for opp in group["opponent"]:
+            j = idx[opp]
+            M[i, n + j] += 1.0 / ki       # Add 1/G of this opponent's AdjD to the team's AdjO equation.
+            M[n + i, j] += 1.0 / ki       # Add 1/G of this opponent's AdjO to the team's AdjD equation.
+
+    try:
+        x = np.linalg.solve(M, b)
+    except np.linalg.LinAlgError:
+        x, *_ = np.linalg.lstsq(M, b, rcond=None)
+
+    adj_o = x[:n]
+    adj_d = x[n:2 * n]
+
+    # Recenter the solved ratings.
+    #
+    # The shifts are:
+    #
+    #     AdjO_new = AdjO + (LeagueAvg - mean(AdjO))
+    #     AdjD_new = AdjD + (LeagueAvg - mean(AdjD))
+    #
+    # This preserves the differences between teams while forcing the average
+    # adjusted offense and defense to sit on the same scale as raw efficiency.
+    adj_o = adj_o + (league_avg - adj_o.mean())
+    adj_d = adj_d + (league_avg - adj_d.mean())
+
+    out = pd.DataFrame({
+        "Team": teams,
+        "AdjO": adj_o,
+        "AdjD": adj_d,
+    })
+    out["AdjEM"] = out["AdjO"] - out["AdjD"]
+    out["Games Used (AdjEM)"] = [k[t] for t in teams]
+    return out
+
+
+# Estimate expected winning percentage and measure "luck."
+#
+# The model uses a Pythagorean expectation based on offensive and defensive
+# efficiency:
+#
+#                     Off^x
+#     Pyth Win % = ---------------
+#                  Off^x + Def^x
+#
+# where x = PYTHAG_EXP.
+#
+# A larger offensive rating increases expected winning percentage, while a
+# larger defensive rating lowers it because allowing more points is worse.
+#
+# Luck is then:
+#
+#     Luck = Actual Win % - Pyth Win %
+#
+# Positive Luck means the team won more often than its efficiency would predict.
+# Negative Luck means it won less often than expected.
+#
+# Luck Z standardizes Luck across all teams:
+#
+#     Luck Z = (Luck - Mean Luck) / Standard Deviation of Luck
+#
+# A Luck Z near 0 is typical, while larger positive or negative values indicate
+# more unusual results relative to the rest of the FBS.
+def add_luck(df: pd.DataFrame) -> pd.DataFrame:
+    if {"AdjO", "AdjD", "win_pct"}.issubset(df.columns):
+        off_col, def_col = "AdjO", "AdjD"
+    elif {"off_rating", "def_rating", "win_pct"}.issubset(df.columns):
+        off_col, def_col = "off_rating", "def_rating"
+    else:
+        print("Luck: required columns missing, skipping luck calculation.")
+        return df
+
+    df = df.copy()
+    off = df[off_col].clip(lower=1e-6)
+    deff = df[def_col].clip(lower=1e-6)
+
+    num = off ** PYTHAG_EXP
+    den = num + (deff ** PYTHAG_EXP)
+    pyth_win_pct = (num / den.replace(0, float("nan"))).fillna(0.5)
+
+    df["Pyth Win Pct"] = pyth_win_pct
+    df["Luck"] = df["win_pct"] - df["Pyth Win Pct"]
+
+    luck_mean = df["Luck"].mean()
+    luck_std = df["Luck"].std(ddof=0)
+    df["Luck Z"] = 0.0 if luck_std == 0 else (df["Luck"] - luck_mean) / luck_std
+    return df
+
+
+
+
+def get_latest_completed_fbs_week(games: list):
+    """
+    Return the highest completed week number containing an FBS-vs-FBS game.
+    """
+    completed_weeks = []
+
+    for game in games:
+        if game.get("completed") is not True:
+            continue
+
+        home_conf = game.get("homeConference")
+        away_conf = game.get("awayConference")
+
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+
+        week = game.get("week")
+        if week is None:
+            continue
+
+        try:
+            completed_weeks.append(int(week))
+        except (TypeError, ValueError):
+            continue
+
+    return max(completed_weeks) if completed_weeks else None
+
+
+def archive_weekly_snapshot():
+    """
+    Archive the current Master.csv as the latest completed FBS week.
+
+    Automatically creates:
+        data/history/<YEAR>/Week XX.csv
+        data/<YEAR> History.csv
+
+    Re-running the same week replaces that week's rows instead of duplicating them.
+    """
+    data_dir = "data"
+    master_file = os.path.join(data_dir, f"{YEAR} Master.csv")
+
+    if not os.path.exists(master_file):
+        raise SystemExit(
+            f"Cannot archive because {master_file} does not exist. "
+            "Run the normal rankings update first."
+        )
+
+    games = get_json(
+        f"https://api.collegefootballdata.com/games?year={YEAR}&seasonType=both"
+    )
+
+    week = get_latest_completed_fbs_week(games)
+
+    if week is None:
+        raise SystemExit(
+            "No completed FBS-vs-FBS week could be identified for archiving."
+        )
+
+    history_dir = os.path.join(data_dir, "history", str(YEAR))
+    os.makedirs(history_dir, exist_ok=True)
+
+    weekly_file = os.path.join(history_dir, f"Week {week:02d}.csv")
+    history_file = os.path.join(data_dir, f"{YEAR} History.csv")
+
+    # Preserve the exact formatting already present in Master.csv.
+    snapshot = pd.read_csv(
+        master_file,
+        dtype=str,
+        keep_default_na=False
+    )
+
+    snapshot.insert(0, "Week", str(week))
+    snapshot.insert(0, "Season", str(YEAR))
+
+    snapshot.to_csv(weekly_file, index=False)
+
+    if os.path.exists(history_file):
+        history = pd.read_csv(
+            history_file,
+            dtype=str,
+            keep_default_na=False
+        )
+
+        if {"Season", "Week"}.issubset(history.columns):
+            history = history[
+                ~(
+                    (history["Season"].astype(str) == str(YEAR))
+                    & (history["Week"].astype(str) == str(week))
+                )
+            ].copy()
+
+        history = pd.concat([history, snapshot], ignore_index=True)
+    else:
+        history = snapshot.copy()
+
+    history["_week_num"] = pd.to_numeric(
+        history["Week"],
+        errors="coerce"
+    )
+
+    if "Rk" in history.columns:
+        history["_rk_num"] = pd.to_numeric(
+            history["Rk"],
+            errors="coerce"
+        )
+
+        history = history.sort_values(
+            ["Season", "_week_num", "_rk_num", "Team"],
+            na_position="last"
+        )
+
+        history = history.drop(columns=["_week_num", "_rk_num"])
+    else:
+        history = history.sort_values(
+            ["Season", "_week_num", "Team"],
+            na_position="last"
+        )
+
+        history = history.drop(columns=["_week_num"])
+
+    history.to_csv(history_file, index=False)
+
+    print(f"Archived completed Week {week}.")
+    print(f"Weekly snapshot: {weekly_file}")
+    print(f"Cumulative history: {history_file}")
+
+
+
+
+
+def build_schedule_csv(games: list, ratings_df: pd.DataFrame, data_dir: str):
+    """
+    Build a team-centric schedule file for the current season.
+
+    Each FBS-vs-FBS game is written twice:
+      - one row from the home team's perspective
+      - one row from the away team's perspective
+
+    Future games include the opponent's current ranking/AdjRtg when available.
+    Completed/live games remain in the file so team pages can show the full
+    season schedule and distinguish past, live, and future games.
+    """
+    current = ratings_df.copy()
+
+    # Coerce ranking metrics for safe lookups.
+    for column in ["Rk", "AdjRk", "AdjRtg", "NetRtg", "Ortg", "DRtg"]:
+        if column in current.columns:
+            current[column] = pd.to_numeric(current[column], errors="coerce")
+
+    current_idx = current.set_index("Team", drop=False)
+
+    rows = []
+
+    for game in games:
+        home = game.get("homeTeam")
+        away = game.get("awayTeam")
+        home_conf = game.get("homeConference")
+        away_conf = game.get("awayConference")
+
+        if not home or not away:
+            continue
+        if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
+            continue
+
+        game_id = game.get("id")
+        week = game.get("week")
+        start_date = (
+            game.get("startDate")
+            or game.get("start_date")
+            or game.get("startTime")
+            or ""
+        )
+
+        completed = bool(game.get("completed") is True)
+        home_points = game.get("homePoints")
+        away_points = game.get("awayPoints")
+
+        # Determine live state from the patched game record.
+        is_live = bool(
+            game.get("completed") is False
+            and home_points is not None
+            and away_points is not None
+        )
+
+        for team, opponent, location, team_conf, opp_conf, team_pts, opp_pts in [
+            (home, away, "Home", home_conf, away_conf, home_points, away_points),
+            (away, home, "Away", away_conf, home_conf, away_points, home_points),
+        ]:
+            opp_row = current_idx.loc[opponent] if opponent in current_idx.index else None
+
+            result = ""
+            if completed and team_pts is not None and opp_pts is not None:
+                if float(team_pts) > float(opp_pts):
+                    result = "W"
+                elif float(team_pts) < float(opp_pts):
+                    result = "L"
+                else:
+                    result = "T"
+
+            rows.append({
+                "Season": YEAR,
+                "Week": week if week is not None else "",
+                "GameId": game_id if game_id is not None else "",
+                "Team": team,
+                "Conference": team_conf or "",
+                "Opponent": opponent,
+                "OpponentConference": opp_conf or "",
+                "Location": location,
+                "StartDate": start_date,
+                "Completed": completed,
+                "Live": is_live and not completed,
+                "TeamPoints": "" if team_pts is None else int(float(team_pts)),
+                "OpponentPoints": "" if opp_pts is None else int(float(opp_pts)),
+                "Result": result,
+                "OpponentRk": (
+                    "" if opp_row is None or pd.isna(opp_row.get("Rk"))
+                    else int(opp_row.get("Rk"))
+                ),
+                "OpponentAdjRk": (
+                    "" if opp_row is None or pd.isna(opp_row.get("AdjRk"))
+                    else int(opp_row.get("AdjRk"))
+                ),
+                "OpponentAdjRtg": (
+                    "" if opp_row is None or pd.isna(opp_row.get("AdjRtg"))
+                    else f"{float(opp_row.get('AdjRtg')):.3f}"
+                ),
+            })
+
+    schedule_df = pd.DataFrame(rows)
+
+    if not schedule_df.empty:
+        schedule_df["_week_num"] = pd.to_numeric(
+            schedule_df["Week"], errors="coerce"
+        )
+        schedule_df = schedule_df.sort_values(
+            ["Team", "_week_num", "StartDate", "Opponent"],
+            na_position="last"
+        ).drop(columns=["_week_num"])
+
+    schedule_file = os.path.join(data_dir, f"{YEAR} Schedule.csv")
+    schedule_df.to_csv(schedule_file, index=False)
+
+    print("Saved schedule to:", schedule_file)
+    return schedule_file
+
+
+
+# Run the complete ranking pipeline.
+#
+# The processing order is:
+#   1. Download season games.
+#   2. Calculate FBS scoring totals.
+#   3. Download and count drives.
+#   4. Calculate raw efficiency ratings.
+#   5. Add win/loss records.
+#   6. Build per-game efficiency observations.
+#   7. Solve schedule-adjusted ratings.
+#   8. Calculate strength of schedule and luck.
+#   9. Rename, order, sort, and export the final columns.
+def main():
+    # Output directory for the rankings CSV and live-game metadata.
+    data_dir = "data"
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Final rankings CSV produced by this script.
+    outfile = os.path.join(data_dir, f"{YEAR} Master.csv")
+
+    # Used only to normalize team names/IDs in live data.
+    team_id_map = get_fbs_team_id_map(YEAR)
+
+    games_url = f"https://api.collegefootballdata.com/games?year={YEAR}&seasonType=both"
+    games = get_json(games_url)
+
+    drives_raw = get_json(
+        f"https://api.collegefootballdata.com/drives?year={YEAR}&seasonType=both"
+    )
+
+    # Live games are intentionally layered on top of the normal season data.
+    # Current scores + completed live drives affect efficiency, but W/L stays
+    # unchanged until the game becomes final.
+    live_scoreboard = get_live_scoreboard()
+    games, drives_raw, live_metadata = merge_live_games(
+        games, drives_raw, live_scoreboard, team_id_map
+    )
+
+    print(f"Live scoreboard games detected: {len(live_scoreboard)}")
+    print(f"Live games merged into ratings: {len(live_metadata)}")
+
+    points_df = get_points(games)
+    fbs_teams = set(points_df["team"])
+
+    season_drives_df = aggregate_season_drives(drives_raw, fbs_teams)
+    ratings_df = compute_ratings(points_df, season_drives_df)   # Calculate unadjusted efficiency ratings.
+    ratings_df = add_record(ratings_df, games)                    # Add each team's FBS record and raw ranking.
+
+    game_drive_counts = aggregate_game_drives(drives_raw, fbs_teams)
+    game_eff_df = build_game_efficiency(games, game_drive_counts, fbs_teams, CAP_MARGIN)
+    adj_df = solve_adjusted_efficiency(game_eff_df)               # Adjust efficiency for opponent strength.
+
+    ratings_df = ratings_df.merge(adj_df, on="Team", how="left")
+    ratings_df["AdjEM Rank"] = ratings_df["AdjEM"].rank(ascending=False, method="min").astype("Int64")
+
+    # Calculate opponent strength of schedule.
+    #
+    # For each team:
+    #
+    #     OppSOS = Sum(Opponent AdjEM) / Number of Games
+    #
+    # Because AdjEM measures opponent quality relative to the FBS average,
+    # a positive OppSOS means the team faced above-average opponents on average.
+    # A negative OppSOS means its opponents were below average.
+    #
+    # SOSRk ranks OppSOS from highest to lowest, so rank 1 represents the
+    # strongest average schedule.
+    adj_em_map = dict(zip(adj_df["Team"], adj_df["AdjEM"]))
+    opp_strength = (
+        game_eff_df.assign(opp_adj_em=game_eff_df["opponent"].map(adj_em_map))
+        .groupby("team")["opp_adj_em"].mean()
+        .rename("opp_strength")
+        .reset_index()
+        .rename(columns={"team": "Team"})
+    )
+    ratings_df = ratings_df.merge(opp_strength, on="Team", how="left")
+    ratings_df["SOSRk"] = ratings_df["opp_strength"].rank(ascending=False, method="min").astype("Int64")
+
+    ratings_df = add_luck(ratings_df)
+
+    # Rename internal variables to compact output-column names.
+    #
+    # Key fields:
+    #   Rk      = rank by raw Net Rating
+    #   AdjRtg  = adjusted efficiency margin, AdjO - AdjD
+    #   AdjRk   = rank by adjusted efficiency margin
+    #   Ortg    = points scored per 100 offensive drives
+    #   DRtg    = points allowed per 100 defensive drives
+    #   OppSOS  = average AdjEM of opponents
+    #   SOSRk   = rank by OppSOS
+    #   Luck    = actual Win % minus expected Pythagorean Win %
+    #   LuckZ   = standardized Luck score
+    # Rename columns to the exact schema consumed by index.html and matchup.html.
+    ratings_df = ratings_df.rename(columns={
+        "Net Rank": "Rk",
+        "Wins": "W",
+        "Losses": "L",
+        "Net Rating": "NetRtg",
+        "AdjEM": "AdjRtg",
+        "AdjEM Rank": "AdjRk",
+        "win_pct": "Win %",
+        "Pyth Win Pct": "PyW %",
+        "Luck Z": "Luck Z",
+        "off_rating": "Ortg",
+        "def_rating": "DRtg",
+        "points_for": "PF",
+        "points_against": "PA",
+        "off_drives": "ODrives",
+        "def_drives": "DDrives",
+        "opp_strength": "SOS",
+        "SOSRk": "SOS rank",
+    })
+
+    # Keep this order stable because the public pages expect this schema.
+    cols = [
+        "Rk", "Team", "Conference", "W", "L",
+        "NetRtg", "AdjRtg", "AdjRk",
+        "Win %", "PyW %", "Luck", "Luck Z",
+        "Ortg", "DRtg", "PF", "PA",
+        "ODrives", "DDrives", "SOS", "SOS rank",
+    ]
+    cols = [c for c in cols if c in ratings_df.columns]
+    ratings_df = ratings_df[cols].copy()
+
+    # Only add teams currently playing an FBS-vs-FBS live game if they do
+    # not yet have a calculated rankings row.
+    ratings_df = add_missing_live_teams(ratings_df, live_metadata)
+
+    # Sort the final table by raw Net Rating rank.
+    #
+    # Rk = 1 corresponds to the highest:
+    #
+    #     Net Rating = Ortg - DRtg
+    #
+    # The adjusted ranking is still preserved separately in AdjRk.
+    ratings_df = ratings_df.sort_values("Rk", ascending=True).reset_index(drop=True)
+
+
+    # Format calculated statistics as EXACTLY three decimal places in the CSV.
+    # They remain parseable by JavaScript/parseFloat on the public pages.
+    decimal_columns = [
+        "NetRtg",
+        "AdjRtg",
+        "Win %",
+        "PyW %",
+        "Luck",
+        "Luck Z",
+        "Ortg",
+        "DRtg",
+        "SOS",
+    ]
+
+    for column in decimal_columns:
+        if column in ratings_df.columns:
+            numeric = pd.to_numeric(ratings_df[column], errors="coerce")
+            ratings_df[column] = numeric.map(
+                lambda value: "" if pd.isna(value) else f"{value:.3f}"
+            )
+
+    integer_columns = [
+        "Rk",
+        "W",
+        "L",
+        "AdjRk",
+        "PF",
+        "PA",
+        "ODrives",
+        "DDrives",
+        "SOS rank",
+    ]
+
+    for column in integer_columns:
+        if column in ratings_df.columns:
+            numeric = pd.to_numeric(ratings_df[column], errors="coerce")
+            ratings_df[column] = numeric.map(
+                lambda value: "" if pd.isna(value) else str(int(round(value)))
+            )
+
+    ratings_df.to_csv(
+        outfile,
+        index=False,
+        na_rep=""
+    )
+
+    # Build/update the current-season schedule file used by team pages.
+    build_schedule_csv(games, ratings_df, data_dir)
+
+
+    # Publish a small companion JSON file used by index.html for the LIVE lights
+    # and "Last updated" timestamp.
+    live_file = os.path.join(data_dir, f"{YEAR} Live.json")
+    live_payload = {
+        "season": YEAR,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "liveGames": live_metadata,
+        "liveTeams": sorted({
+            team
+            for game in live_metadata
+            for team in (game.get("homeTeam"), game.get("awayTeam"))
+            if team
+        }),
     }
 
-    function makeSortable(thead) {
-      const ths = thead.querySelectorAll("tr:last-child th.sortable");
-
-      ths.forEach(th => {
-        th.addEventListener("click", () => {
-          const index = Number(th.dataset.index);
-          const current = th.dataset.sort || "none";
-          const next = current === "asc" ? "desc" : "asc";
-
-          ths.forEach(h => (h.dataset.sort = "none"));
-          th.dataset.sort = next;
-
-          if (!STATE) return;
-
-          STATE.rows.sort((a, b) => {
-            const aText = String(a[index] ?? "");
-            const bText = String(b[index] ?? "");
-
-            const aNum = Number(aText);
-            const bNum = Number(bText);
-            const aIsNum = aText.trim() !== "" && Number.isFinite(aNum);
-            const bIsNum = bText.trim() !== "" && Number.isFinite(bNum);
-
-            let cmp;
-            if (aIsNum && bIsNum) cmp = aNum - bNum;
-            else cmp = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: "base" });
-
-            return next === "asc" ? cmp : -cmp;
-          });
-
-          renderBody();
-        });
-      });
-    }
-
-    let stripeStyleEl = null;
-    function setStriping(on) {
-      if (on) {
-        if (stripeStyleEl) {
-          stripeStyleEl.remove();
-          stripeStyleEl = null;
-        }
-        return;
-      }
-
-      if (!stripeStyleEl) {
-        stripeStyleEl = document.createElement("style");
-        stripeStyleEl.id = "no-striping-style";
-        stripeStyleEl.textContent = `
-          tbody tr:nth-child(even){ background: transparent !important; }
-        `;
-        document.head.appendChild(stripeStyleEl);
-      }
-    }
-
-    function setLoading(isLoading) {
-      els.loadingLine.style.display = isLoading ? "block" : "none";
-    }
-
-    function setChampionNote() {
-      const note = els.champNote;
-      if (ACTIVE_IS_FINAL && ACTIVE_CHAMPION) {
-        note.textContent = `${ACTIVE_CHAMPION} is highlighted as the national champion.`;
-        note.style.display = "block";
-      } else {
-        note.textContent = "";
-        note.style.display = "none";
-      }
-    }
-
-    function setStatusLine(extraText) {
-      els.statusLine.textContent = extraText || "";
-    }
-
-    function liveJsonForYear(year) {
-      return `${RAW_BASE}${year}%20Live.json`;
-    }
-
-    function formatUpdatedAt(isoString) {
-      if (!isoString) return null;
-      const dt = new Date(isoString);
-      if (Number.isNaN(dt.getTime())) return null;
-
-      return new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/New_York",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        timeZoneName: "short"
-      }).format(dt);
-    }
-
-    function buildLiveTooltip(teamName) {
-      const game = LIVE_META.gameByTeam.get(String(teamName || "").toLowerCase());
-      if (!game) return "Live game in progress";
-
-      const home = game.homeTeam || "Home";
-      const away = game.awayTeam || "Away";
-      const hp = game.homePoints ?? 0;
-      const ap = game.awayPoints ?? 0;
-      const period = game.period ? `Q${game.period}` : "Live";
-      const clock = game.clock ? ` ${game.clock}` : "";
-
-      return `${away} ${ap} - ${home} ${hp} • ${period}${clock}`;
-    }
-
-    async function loadLiveMetadata(year) {
-      LIVE_META = {
-        updatedAt: null,
-        liveGames: [],
-        liveTeams: new Set(),
-        gameByTeam: new Map()
-      };
-
-      try {
-        const url = `${liveJsonForYear(year)}?t=${Date.now()}`;
-        const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) return LIVE_META;
-
-        const data = await r.json();
-        const games = Array.isArray(data?.liveGames) ? data.liveGames : [];
-        const teams = new Set(
-          (Array.isArray(data?.liveTeams) ? data.liveTeams : [])
-            .map(t => String(t).toLowerCase())
-        );
-
-        const gameByTeam = new Map();
-        for (const game of games) {
-          for (const team of [game.homeTeam, game.awayTeam]) {
-            if (team) gameByTeam.set(String(team).toLowerCase(), game);
-          }
-        }
-
-        LIVE_META = {
-          updatedAt: data?.updatedAt || null,
-          liveGames: games,
-          liveTeams: teams,
-          gameByTeam
-        };
-      } catch (err) {
-        console.warn("Live metadata could not be loaded:", err);
-      }
-
-      return LIVE_META;
-    }
-
-    function currentStatusText() {
-      if (ACTIVE_IS_FINAL && ACTIVE_CHAMPION) {
-        return `Final season. Champion: ${ACTIVE_CHAMPION}.`;
-      }
-
-      const parts = [];
-      const updated = formatUpdatedAt(LIVE_META.updatedAt);
-
-      if (updated) parts.push(`Last updated: ${updated}`);
-      else parts.push("Live season");
-
-      const liveCount = LIVE_META.liveGames.length;
-      if (liveCount > 0) {
-        parts.push(`${liveCount} live FBS game${liveCount === 1 ? "" : "s"} included`);
-      } else {
-        parts.push("No live FBS games currently in progress");
-      }
-
-      return parts.join(" • ");
-    }
-
-    async function loadChampionsJson() {
-      try {
-        const r = await fetch(CHAMPIONS_JSON_URL, { cache: "no-store" });
-        if (!r.ok) return {};
-        const data = await r.json();
-        return (data && typeof data === "object") ? data : {};
-      } catch {
-        return {};
-      }
-    }
-
-    // Builds the list of selectable seasons. (No network probing is done here —
-    // that would mean one request per year just to populate a dropdown. If you
-    // want to hide years with no CSV, maintain an explicit list instead.)
-    function buildSeasonYearList() {
-      const years = [];
-      for (let y = CURRENT_SEASON; y >= FIRST_SEASON; y--) {
-        years.push(String(y));
-      }
-      return years;
-    }
-
-    function populateYearSelect(years) {
-      const sel = els.yearSelect;
-      const frag = document.createDocumentFragment();
-      years.forEach(y => {
-        const opt = document.createElement("option");
-        opt.value = y;
-        opt.textContent = y;
-        frag.appendChild(opt);
-      });
-      sel.innerHTML = "";
-      sel.appendChild(frag);
-    }
-
-    function populateFinalLinks() {
-      const wrap = els.finalLinks;
-
-      // Remove existing generated links (keep the "Final results:" label)
-      wrap.querySelectorAll("a.yearLink").forEach(a => a.remove());
-
-      // Only show links for years that have a champion set
-      const finalYears = AVAILABLE_YEARS.filter(y => !!CHAMPIONS_BY_YEAR[y]);
-
-      const frag = document.createDocumentFragment();
-      finalYears.forEach(y => {
-        const a = document.createElement("a");
-        a.href = "#";
-        a.className = "yearLink";
-        a.dataset.year = y;
-        a.textContent = y;
-        a.addEventListener("click", (e) => {
-          e.preventDefault();
-          els.yearSelect.value = y;
-          loadYear(y);
-          history.replaceState({}, "", `?year=${encodeURIComponent(y)}`);
-        });
-        frag.appendChild(a);
-      });
-      wrap.appendChild(frag);
-    }
-
-    async function loadYear(year) {
-      if (!year) return;
-
-      ACTIVE_YEAR = String(year);
-      ACTIVE_CHAMPION = CHAMPIONS_BY_YEAR[ACTIVE_YEAR] || null;
-      ACTIVE_CHAMPION_LC = ACTIVE_CHAMPION ? ACTIVE_CHAMPION.toLowerCase() : null;
-      ACTIVE_IS_FINAL = !!ACTIVE_CHAMPION; // final if champion exists
-
-      els.pageTitle.textContent = `CFB Rankings ${ACTIVE_YEAR}`;
-
-      setChampionNote();
-
-      // Clear filters on year change (optional; comment out if you want to keep filters)
-      els.teamSearch.value = "";
-      els.topN.value = "0";
-
-      const url = csvForYear(ACTIVE_YEAR);
-
-      setLoading(true);
-      setStatusLine(`Loading ${url}…`);
-
-      try {
-        const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-
-        const text = await r.text();
-        const { header, rows } = parseCSV(text);
-
-        // Load live metadata before rendering rows so live teams get their red dot.
-        await loadLiveMetadata(ACTIVE_YEAR);
-
-        if (!header.length) {
-          console.error("CSV appears empty or malformed.");
-          setStatusLine("CSV appears empty or malformed.");
-          return;
-        }
-
-        buildTable(header, rows);
-
-        const isStriped = els.stripeToggle.value === "on";
-        setStriping(isStriped);
-
-        // Status includes the generated-file timestamp and live-game count.
-        setStatusLine(currentStatusText());
-
-      } catch (err) {
-        console.error("Failed to load CSV:", err);
-        setStatusLine("Failed to load this season's CSV. Make sure the file exists in /data.");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    // Hook up UI
-    els.teamSearch.addEventListener("input", debounce(renderBody, 150));
-    els.conferenceMenuButton.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const isOpen = els.conferenceMenu.classList.toggle("open");
-      els.conferenceMenuButton.setAttribute("aria-expanded", String(isOpen));
-    });
-
-    els.conferenceSelectAll.addEventListener("click", () => {
-      els.conferenceOptions.querySelectorAll('input[type="checkbox"]').forEach(input => input.checked = true);
-      updateConferenceMenuText();
-      renderBody();
-    });
-
-    els.conferenceClear.addEventListener("click", () => {
-      els.conferenceOptions.querySelectorAll('input[type="checkbox"]').forEach(input => input.checked = false);
-      updateConferenceMenuText();
-      renderBody();
-    });
-
-    document.addEventListener("click", (e) => {
-      if (!els.conferenceMenu.contains(e.target)) {
-        els.conferenceMenu.classList.remove("open");
-        els.conferenceMenuButton.setAttribute("aria-expanded", "false");
-      }
-    });
-    els.topN.addEventListener("change", renderBody);
-
-    els.stripeToggle.addEventListener("change", (e) => {
-      setStriping(e.target.value === "on");
-    });
-
-    function getPublishMetadata() {
-      const selectedConferences = getSelectedConferences();
-      const totalConferences = els.conferenceOptions.querySelectorAll('input[type="checkbox"]').length;
-      const conf = (!selectedConferences.length || selectedConferences.length === totalConferences)
-        ? "All conferences"
-        : selectedConferences.join(", ");
-      const top = els.topN.value === "0" ? "All teams" : `Top ${els.topN.value}`;
-      const team = els.teamSearch.value.trim();
-      const filterParts = [conf, top];
-      if (team) filterParts.push(`Team filter: ${team}`);
-
-      const seasonText = `${ACTIVE_YEAR} Season${ACTIVE_IS_FINAL ? " — Final Rankings" : " — Current Rankings"}`;
-      const metaText = `${filterParts.join(" • ")} • Generated ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`;
-      return { seasonText, metaText };
-    }
-
-    function closePublishMenu() {
-      els.publishMenu.classList.remove("open");
-      els.publishMenuButton.setAttribute("aria-expanded", "false");
-    }
-
-    els.publishMenuButton.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const willOpen = !els.publishMenu.classList.contains("open");
-      els.publishMenu.classList.toggle("open", willOpen);
-      els.publishMenuButton.setAttribute("aria-expanded", String(willOpen));
-    });
-
-    document.addEventListener("click", (e) => {
-      if (!els.publishMenu.contains(e.target)) closePublishMenu();
-    });
-
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closePublishMenu();
-    });
-
-    els.publishPdf.addEventListener("click", () => {
-      closePublishMenu();
-      const { seasonText, metaText } = getPublishMetadata();
-      els.printReportSeason.textContent = seasonText;
-      els.printReportMeta.textContent = metaText;
-      window.print();
-    });
-
-    function canvasToPngBlob(canvas) {
-      return new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
-          if (!blob) {
-            reject(new Error("Could not create PNG image."));
-            return;
-          }
-          resolve(blob);
-        }, "image/png");
-      });
-    }
-
-    function downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-
-    function buildPngReportPage(rows, pageNumber, pageCount, seasonText, metaText) {
-      const page = document.createElement("section");
-      page.className = "png-report-page";
-
-      const header = document.createElement("header");
-      header.className = "png-report-header";
-      header.innerHTML = `
-        <h1>College Football Efficiency Rankings</h1>
-        <p class="png-report-season"></p>
-        <p class="png-report-meta"></p>
-      `;
-      header.querySelector(".png-report-season").textContent = seasonText;
-      header.querySelector(".png-report-meta").textContent = metaText;
-      page.appendChild(header);
-
-      const table = document.createElement("table");
-      table.innerHTML = `<thead>${els.thead.innerHTML}</thead><tbody></tbody>`;
-      const tbody = table.querySelector("tbody");
-      rows.forEach(row => tbody.appendChild(row.cloneNode(true)));
-      page.appendChild(table);
-
-      const footer = document.createElement("footer");
-      footer.className = "png-report-footer";
-      const left = document.createElement("span");
-      left.textContent = "Rankings use FBS-vs-FBS games only. Generated from the CFB Rankings dataset for publication.";
-      const right = document.createElement("span");
-      right.textContent = `Page ${pageNumber} of ${pageCount}`;
-      footer.append(left, right);
-      page.appendChild(footer);
-
-      return page;
-    }
-
-    els.publishPng.addEventListener("click", async () => {
-      closePublishMenu();
-
-      if (typeof html2canvas !== "function" || typeof JSZip !== "function") {
-        alert("PNG publishing could not load the export libraries. Check your internet connection and try again.");
-        return;
-      }
-
-      const visibleRows = Array.from(els.tbody.querySelectorAll("tr"));
-      if (!visibleRows.length) {
-        alert("There are no visible rankings to publish.");
-        return;
-      }
-
-      const { seasonText, metaText } = getPublishMetadata();
-      const rowsPerPage = 36;
-      const pageCount = Math.ceil(visibleRows.length / rowsPerPage);
-      const stage = document.createElement("div");
-      stage.className = "png-export-stage";
-      document.body.appendChild(stage);
-
-      const oldText = els.publishMenuButton.childNodes[0].nodeValue;
-      els.publishMenuButton.childNodes[0].nodeValue = "Publishing PNGs ";
-      els.publishMenuButton.disabled = true;
-
-      try {
-        const zip = new JSZip();
-        const safeYear = String(ACTIVE_YEAR || "rankings").replace(/[^0-9A-Za-z_-]/g, "_");
-
-        for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-          const start = pageIndex * rowsPerPage;
-          const pageRows = visibleRows.slice(start, start + rowsPerPage);
-          const page = buildPngReportPage(pageRows, pageIndex + 1, pageCount, seasonText, metaText);
-          stage.appendChild(page);
-
-          const canvas = await html2canvas(page, {
-            backgroundColor: "#ffffff",
-            scale: 2,
-            useCORS: true,
-            logging: false,
-            width: 1320,
-            height: 1020
-          });
-
-          const pngBlob = await canvasToPngBlob(canvas);
-          const filename = `CFB_Rankings_${safeYear}_Page_${String(pageIndex + 1).padStart(2, "0")}.png`;
-          zip.file(filename, pngBlob);
-          page.remove();
-        }
-
-        const zipBlob = await zip.generateAsync({
-          type: "blob",
-          compression: "DEFLATE",
-          compressionOptions: { level: 6 }
-        });
-        downloadBlob(zipBlob, `CFB_Rankings_${safeYear}_PNGs.zip`);
-      } catch (err) {
-        console.error("PNG publishing failed:", err);
-        alert("PNG publishing failed. See the browser console for details.");
-      } finally {
-        stage.remove();
-        els.publishMenuButton.childNodes[0].nodeValue = oldText;
-        els.publishMenuButton.disabled = false;
-      }
-    });
-
-    els.yearSelect.addEventListener("change", (e) => {
-      const y = e.target.value;
-      history.replaceState({}, "", `?year=${encodeURIComponent(y)}`);
-      loadYear(y);
-    });
-
-    // Boot
-    (async function init() {
-      // champions.json is optional
-      CHAMPIONS_BY_YEAR = await loadChampionsJson();
-
-      AVAILABLE_YEARS = buildSeasonYearList();
-
-      populateYearSelect(AVAILABLE_YEARS);
-      populateFinalLinks();
-
-      // Initial year from URL param, else DEFAULT_YEAR if present, else first available
-      const params = new URLSearchParams(location.search);
-      const requested = params.get("year");
-      const initial = (requested && AVAILABLE_YEARS.includes(requested))
-        ? requested
-        : (AVAILABLE_YEARS.includes(DEFAULT_YEAR) ? DEFAULT_YEAR : AVAILABLE_YEARS[0]);
-
-      els.yearSelect.value = initial;
-      await loadYear(initial);
-
-      // Default striping
-      setStriping(true);
-    })();
-  </script>
-</body>
-</html>
+    with open(live_file, "w", encoding="utf-8") as f:
+        json.dump(live_payload, f, indent=2, ensure_ascii=False)
+
+    print("Saved rankings to:", outfile)
+    print("Saved live metadata to:", live_file)
+    print(f"Live FBS games included: {len(live_metadata)}")
+    print(ratings_df.head(15))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Calculate CFB efficiency rankings or archive the latest completed week."
+    )
+    parser.add_argument(
+        "--archive-week",
+        action="store_true",
+        help="Archive the current Master.csv as the latest completed FBS week."
+    )
+    args = parser.parse_args()
+
+    if args.archive_week:
+        archive_weekly_snapshot()
+    else:
+        main()
