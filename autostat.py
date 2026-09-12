@@ -152,17 +152,32 @@ def get_live_scoreboard() -> list:
     return live_games
 
 
+def _extract_team_name(value):
+    """Return a team name whether CFBD gives us a string or a nested object."""
+    if isinstance(value, dict):
+        return value.get("name") or value.get("team") or value.get("school")
+    return value
+
+
+def _extract_team_points(value):
+    """Return current points whether the scoreboard uses a team object or flat fields."""
+    if isinstance(value, dict):
+        return value.get("points")
+    return None
+
+
 def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
     """
-    Merge current live scores and completed live drives into the season data.
+    Replace season data for in-progress games with authoritative live data.
 
-    Live points and completed drives affect efficiency/rating calculations.
-    Win/loss records do NOT change until CFBD marks the game completed.
+    For every live FBS-vs-FBS game:
+      - scoreboard score replaces the /games score
+      - normal /drives rows for that game are removed
+      - completed drives from /live/plays are inserted
+      - completed=False is forced so W/L does not change yet
 
-    Returns:
-        updated_games
-        updated_drives
-        live_metadata
+    This makes PF, PA, ODrives, DDrives, ORtg, DRtg, NetRtg, AdjRtg, and SOS
+    respond to games in progress while leaving records unchanged until final.
     """
     if not live_scoreboard:
         return games, drives_raw, []
@@ -173,16 +188,21 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
         if g.get("id") is not None
     }
 
-    live_ids = {str(g.get("id")) for g in live_scoreboard if g.get("id") is not None}
+    live_ids = {
+        str(g.get("id"))
+        for g in live_scoreboard
+        if g.get("id") is not None
+    }
 
-    # Remove any live-game drive records already present in /drives so they are
-    # not double-counted when we append the dedicated live endpoint's drives.
+    # Remove any season-drive rows belonging to a live game. This prevents
+    # double-counting and ensures the live endpoint is authoritative.
     drive_id_fields = ("gameId", "game_id", "gameID")
 
     def drive_game_id(d):
         for field in drive_id_fields:
-            if d.get(field) is not None:
-                return str(d.get(field))
+            value = d.get(field)
+            if value is not None:
+                return str(value)
         return None
 
     updated_drives = [
@@ -196,64 +216,82 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
         game_id = board_game.get("id")
         if game_id is None:
             continue
-
         gid = str(game_id)
-        home_info = board_game.get("homeTeam") or {}
-        away_info = board_game.get("awayTeam") or {}
 
-        home_team = home_info.get("name")
-        away_team = away_info.get("name")
-        home_points = home_info.get("points")
-        away_points = away_info.get("points")
+        # Support both nested scoreboard schema and possible flat fallbacks.
+        home_obj = board_game.get("homeTeam")
+        away_obj = board_game.get("awayTeam")
+
+        home_team = _extract_team_name(home_obj) or board_game.get("home")
+        away_team = _extract_team_name(away_obj) or board_game.get("away")
+
+        home_points = _extract_team_points(home_obj)
+        away_points = _extract_team_points(away_obj)
+
+        if home_points is None:
+            home_points = board_game.get("homePoints")
+        if away_points is None:
+            away_points = board_game.get("awayPoints")
 
         if not home_team or not away_team:
+            print(f"Skipping live game {gid}: missing team names")
             continue
 
-        # Patch the /games record with the current live score. If the game is
-        # unexpectedly absent from /games, create the minimum record needed by
-        # the rating pipeline.
+        # Only use games where the current score is actually available.
+        if home_points is None or away_points is None:
+            print(f"Skipping live game {gid}: live score unavailable")
+            continue
+
+        # Patch or create the corresponding /games record.
         game_record = games_by_id.get(gid)
         if game_record is None:
             game_record = {
                 "id": game_id,
                 "homeTeam": home_team,
                 "awayTeam": away_team,
-                "homeConference": home_info.get("conference"),
-                "awayConference": away_info.get("conference"),
-                "homePoints": home_points,
-                "awayPoints": away_points,
-                "completed": False,
+                "homeConference": (
+                    home_obj.get("conference") if isinstance(home_obj, dict) else None
+                ),
+                "awayConference": (
+                    away_obj.get("conference") if isinstance(away_obj, dict) else None
+                ),
             }
             games.append(game_record)
             games_by_id[gid] = game_record
-        else:
-            game_record["homeTeam"] = home_team
-            game_record["awayTeam"] = away_team
-            game_record["homeConference"] = (
-                home_info.get("conference") or game_record.get("homeConference")
-            )
-            game_record["awayConference"] = (
-                away_info.get("conference") or game_record.get("awayConference")
-            )
-            game_record["homePoints"] = home_points
-            game_record["awayPoints"] = away_points
-            game_record["completed"] = False
 
-        # Pull live play/drive data for this individual game.
+        game_record["homeTeam"] = home_team
+        game_record["awayTeam"] = away_team
+        game_record["homePoints"] = float(home_points)
+        game_record["awayPoints"] = float(away_points)
+        game_record["completed"] = False
+
+        if isinstance(home_obj, dict) and home_obj.get("conference"):
+            game_record["homeConference"] = home_obj.get("conference")
+        if isinstance(away_obj, dict) and away_obj.get("conference"):
+            game_record["awayConference"] = away_obj.get("conference")
+
+        # Pull the live play-by-play payload for this game.
         live_game = get_json_optional(
             f"https://api.collegefootballdata.com/live/plays?gameId={game_id}"
         )
 
-        completed_drive_count = 0
-        if isinstance(live_game, dict):
-            for drive in live_game.get("drives") or []:
-                offense = drive.get("offense")
-                defense = drive.get("defense")
-                result = str(drive.get("result") or "").strip()
+        completed_drives = 0
 
-                # Do not count a drive that is still in progress. A completed
-                # drive should have a result such as Punt, Touchdown, Field Goal,
-                # Turnover, End of Half, etc.
+        if isinstance(live_game, dict):
+            drive_list = live_game.get("drives") or []
+
+            for drive in drive_list:
+                offense = _extract_team_name(drive.get("offense"))
+                defense = _extract_team_name(drive.get("defense"))
+
+                # A completed drive usually has a result. Some payloads may use
+                # endReason instead, so accept either.
+                result = (
+                    drive.get("result")
+                    or drive.get("endReason")
+                    or drive.get("driveResult")
+                )
+
                 if not offense or not defense or not result:
                     continue
 
@@ -262,21 +300,33 @@ def merge_live_games(games: list, drives_raw: list, live_scoreboard: list):
                     "offense": offense,
                     "defense": defense,
                 })
-                completed_drive_count += 1
+                completed_drives += 1
+
+        if completed_drives == 0:
+            print(
+                f"Live game {away_team} at {home_team}: score found, "
+                "but no completed live drives were available."
+            )
 
         live_metadata.append({
             "id": game_id,
             "status": "in_progress",
             "homeTeam": home_team,
             "awayTeam": away_team,
-            "homePoints": home_points,
-            "awayPoints": away_points,
+            "homePoints": float(home_points),
+            "awayPoints": float(away_points),
             "period": board_game.get("period"),
             "clock": board_game.get("clock"),
-            "completedDrives": completed_drive_count,
+            "completedDrives": completed_drives,
         })
 
+        print(
+            f"LIVE INCLUDED: {away_team} {away_points} - "
+            f"{home_team} {home_points} | completed drives: {completed_drives}"
+        )
+
     return games, updated_drives, live_metadata
+
 
 
 def get_points(games: list) -> pd.DataFrame:
@@ -802,6 +852,9 @@ def main():
     games, drives_raw, live_metadata = merge_live_games(
         games, drives_raw, live_scoreboard
     )
+
+    print(f"Live scoreboard games detected: {len(live_scoreboard)}")
+    print(f"Live games merged into ratings: {len(live_metadata)}")
 
     points_df = get_points(games)
     fbs_teams = set(points_df["team"])
