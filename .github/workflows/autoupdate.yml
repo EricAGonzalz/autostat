@@ -5,10 +5,10 @@ on:
 
   schedule:
     # Live/current rankings refresh every 10 minutes.
-    - cron: "*/10 * * * *"
+    - cron: "3,13,23,33,43,53 * * * *"
 
     # Weekly archive: Monday at 10:07 UTC.
-    - cron: "*/10 * * * *"
+    - cron: "7 /10 * * * *"
 
 permissions:
   contents: read
