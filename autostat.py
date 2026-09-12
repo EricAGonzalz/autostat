@@ -987,6 +987,13 @@ def add_luck(df: pd.DataFrame) -> pd.DataFrame:
 #   8. Calculate strength of schedule and luck.
 #   9. Rename, order, sort, and export the final columns.
 def main():
+    # Output directory for the rankings CSV and live-game metadata.
+    data_dir = "data"
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Final rankings CSV produced by this script.
+    outfile = os.path.join(data_dir, f"{YEAR} Master.csv")
+
     # Used only to normalize team names/IDs in live data.
     team_id_map = get_fbs_team_id_map(YEAR)
 
