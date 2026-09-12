@@ -20,9 +20,18 @@ FBS_CONFERENCES = {
 # YEAR selects the season to analyze. API_KEY authenticates requests to the
 # CollegeFootballData API. TIMEOUT controls how long an API request may wait
 # before being treated as failed.
-YEAR = 2026
+# GitHub Actions can override the season with the CFB_YEAR environment variable.
+# Locally, this defaults to 2026 if CFB_YEAR is not set.
+YEAR = int(os.environ.get("CFB_YEAR", "2026"))
 
-API_KEY = "ESXxQ4snMQtWgXZgssrdC42fs5xL/4t2PAjt+b7NhuMon2bVy3fDADQNoaLtNrni"
+# Never store the CollegeFootballData API key in source control.
+# In GitHub, create an Actions secret named CFBD_API_KEY.
+API_KEY = os.environ.get("CFBD_API_KEY")
+if not API_KEY:
+    raise SystemExit(
+        "Missing CFBD_API_KEY. Set it as an environment variable locally or "
+        "as a GitHub Actions repository secret."
+    )
 
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
@@ -647,28 +656,34 @@ def main():
     #   SOSRk   = rank by OppSOS
     #   Luck    = actual Win % minus expected Pythagorean Win %
     #   LuckZ   = standardized Luck score
+    # Rename columns to the exact schema consumed by index.html and matchup.html.
     ratings_df = ratings_df.rename(columns={
         "Net Rank": "Rk",
+        "Wins": "W",
+        "Losses": "L",
+        "Net Rating": "NetRtg",
         "AdjEM": "AdjRtg",
         "AdjEM Rank": "AdjRk",
         "win_pct": "Win %",
-        "Pyth Win Pct": "Pyth Win%",
-        "Luck Z": "LuckZ",
+        "Pyth Win Pct": "PyW %",
+        "Luck Z": "Luck Z",
         "off_rating": "Ortg",
         "def_rating": "DRtg",
         "points_for": "PF",
         "points_against": "PA",
-        "off_drives": "ODrvs",
-        "def_drives": "DDrvs",
-        "opp_strength": "OppSOS",
+        "off_drives": "ODrives",
+        "def_drives": "DDrives",
+        "opp_strength": "SOS",
+        "SOSRk": "SOS rank",
     })
 
+    # Keep this order stable because the public pages expect this schema.
     cols = [
-        "Rk", "Team", "Conference", "Wins", "Losses",
-        "Net Rating", "AdjRtg", "AdjRk",
-        "Win %", "Pyth Win%", "Luck", "LuckZ",
+        "Rk", "Team", "Conference", "W", "L",
+        "NetRtg", "AdjRtg", "AdjRk",
+        "Win %", "PyW %", "Luck", "Luck Z",
         "Ortg", "DRtg", "PF", "PA",
-        "ODrvs", "DDrvs", "OppSOS", "SOSRk",
+        "ODrives", "DDrives", "SOS", "SOS rank",
     ]
     cols = [c for c in cols if c in ratings_df.columns]
     ratings_df = ratings_df[cols].copy()
@@ -682,9 +697,29 @@ def main():
     # The adjusted ranking is still preserved separately in AdjRk.
     ratings_df = ratings_df.sort_values("Rk", ascending=True).reset_index(drop=True)
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    outfile = os.path.join(script_dir, f"cfb_efficiency_{YEAR}_FBS_AdjEM.csv")
-    ratings_df.to_csv(outfile, index=False)
+    # Keep calculated decimal fields at exactly three decimal places.
+    decimal_columns = [
+        "NetRtg", "AdjRtg", "Win %", "PyW %",
+        "Luck", "Luck Z", "Ortg", "DRtg", "SOS",
+    ]
+    decimal_columns = [c for c in decimal_columns if c in ratings_df.columns]
+    ratings_df[decimal_columns] = ratings_df[decimal_columns].round(3)
+
+    # In GitHub Actions, GITHUB_WORKSPACE is the repository root. Locally,
+    # fall back to the directory containing this script.
+    repo_root = os.environ.get(
+        "GITHUB_WORKSPACE",
+        os.path.dirname(os.path.abspath(__file__))
+    )
+    data_dir = os.path.join(repo_root, "data")
+    os.makedirs(data_dir, exist_ok=True)
+
+    # This filename matches the URLs already used by index.html/matchup.html:
+    # data/2026 Master.csv, data/2027 Master.csv, etc.
+    outfile = os.path.join(data_dir, f"{YEAR} Master.csv")
+
+    # float_format preserves trailing zeroes (for example 1.000 and 140.000).
+    ratings_df.to_csv(outfile, index=False, float_format="%.3f")
 
     print("Saved rankings to:", outfile)
     print(ratings_df.head(15))
