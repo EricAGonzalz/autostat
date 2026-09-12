@@ -3,12 +3,12 @@ name: Update CFB Rankings
 on:
   workflow_dispatch:
 
-  schedule:
-    # Live/current rankings refresh every 15 minutes.
-    - cron: "10,20,30,40,50 * * * *"
+schedule:
+  # Live/current rankings refresh every 10 minutes.
+  - cron: "*/10 * * * *"
 
-    # Weekly archive: Monday at 10:07 UTC.
-    - cron: "7 10 * * 1"
+  # Weekly archive: Monday at 10:07 UTC.
+  - cron: "7 10 * * 1"
 
 permissions:
   contents: read
