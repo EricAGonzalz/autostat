@@ -3,9 +3,12 @@ name: Update CFB Rankings
 on:
   workflow_dispatch:
 
-  # Automatic refresh every 15 minutes.
   schedule:
+    # Live/current rankings refresh every 15 minutes.
     - cron: "*/15 * * * *"
+
+    # Weekly archive: Monday at 10:07 UTC.
+    - cron: "7 10 * * 1"
 
 permissions:
   contents: read
@@ -39,6 +42,10 @@ jobs:
       - name: Recalculate rankings
         run: python autostat.py
 
+      - name: Archive weekly snapshot
+        if: github.event_name == 'schedule' && github.event.schedule == '7 10 * * 1'
+        run: python autostat.py --archive-week
+
       - name: Check out public rankings repo
         uses: actions/checkout@v4
         with:
@@ -46,21 +53,45 @@ jobs:
           token: ${{ secrets.CFB_PUBLISH_TOKEN }}
           path: public-repo
 
-      - name: Copy updated rankings and live metadata
+      - name: Copy updated rankings, schedule, live metadata, and history
+        shell: bash
         run: |
+          mkdir -p "public-repo/data"
+
           cp "data/${CFB_YEAR} Master.csv" "public-repo/data/${CFB_YEAR} Master.csv"
           cp "data/${CFB_YEAR} Live.json" "public-repo/data/${CFB_YEAR} Live.json"
+          cp "data/${CFB_YEAR} Schedule.csv" "public-repo/data/${CFB_YEAR} Schedule.csv"
+
+          if [ -f "data/${CFB_YEAR} History.csv" ]; then
+            cp "data/${CFB_YEAR} History.csv" "public-repo/data/${CFB_YEAR} History.csv"
+          fi
+
+          if [ -d "data/history/${CFB_YEAR}" ]; then
+            mkdir -p "public-repo/data/history/${CFB_YEAR}"
+            cp -r "data/history/${CFB_YEAR}/." "public-repo/data/history/${CFB_YEAR}/"
+          fi
 
       - name: Commit and push updated files
         working-directory: public-repo
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add "data/${CFB_YEAR} Master.csv" "data/${CFB_YEAR} Live.json"
+          git add "data/${CFB_YEAR} Master.csv"
+          git add "data/${CFB_YEAR} Live.json"
+          git add "data/${CFB_YEAR} Schedule.csv"
+
+          if [ -f "data/${CFB_YEAR} History.csv" ]; then
+            git add "data/${CFB_YEAR} History.csv"
+          fi
+
+          if [ -d "data/history/${CFB_YEAR}" ]; then
+            git add "data/history/${CFB_YEAR}"
+          fi
 
           if git diff --cached --quiet; then
-            echo "No ranking or live-data changes to commit."
+            echo "No ranking, schedule, live-data, or history changes to commit."
             exit 0
           fi
 
