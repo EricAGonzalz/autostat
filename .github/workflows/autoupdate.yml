@@ -5,7 +5,7 @@ on:
 
   schedule:
     # Live/current rankings refresh every 15 minutes.
-    - cron: "12,27,42,57 * * * *"
+    - cron: "10,20,30,40,50 * * * *"
 
     # Weekly archive: Monday at 10:07 UTC.
     - cron: "7 10 * * 1"
