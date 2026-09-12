@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
 
   schedule:
-  # Live/current rankings refresh every 10 minutes.
-  - cron: "*/10 * * * *"
+    # Live/current rankings refresh every 10 minutes.
+    - cron: "*/10 * * * *"
 
-  # Archive once per day at 10:07 UTC.
-  - cron: "7 10 * * *"
+    # Archive once per day at 10:07 UTC.
+    - cron: "7 10 * * *"
 
 permissions:
   contents: read
@@ -64,8 +64,8 @@ jobs:
       - name: Recalculate rankings
         run: python autostat.py
 
-      - name: Archive weekly snapshot
-        if: github.event_name == 'schedule' && github.event.schedule == '7 10 * * 1'
+      - name: Archive daily snapshot
+        if: github.event_name == 'schedule' && github.event.schedule == '7 10 * * *'
         run: python autostat.py --archive-week
 
       - name: Copy updated files to public repo
@@ -120,8 +120,5 @@ jobs:
 
           git commit -m "Auto-update ${CFB_YEAR} CFB rankings"
 
-          # Synchronize with any changes pushed to the public repo
-          # while this workflow was running.
           git pull --rebase origin main
-
           git push origin main
