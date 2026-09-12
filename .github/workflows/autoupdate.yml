@@ -119,4 +119,9 @@ jobs:
           fi
 
           git commit -m "Auto-update ${CFB_YEAR} CFB rankings"
-          git push
+
+          # Synchronize with any changes pushed to the public repo
+          # while this workflow was running.
+          git pull --rebase origin main
+
+          git push origin main
