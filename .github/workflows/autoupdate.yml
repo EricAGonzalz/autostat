@@ -16,9 +16,23 @@ jobs:
 
     env:
       CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
-      CFB_YEAR: "2026"
 
     steps:
+      - name: Determine CFB season
+        shell: bash
+        run: |
+          CALENDAR_YEAR=$(date -u +%Y)
+          MONTH=$(date -u +%m)
+
+          if [ "$MONTH" = "01" ]; then
+            CFB_YEAR=$((CALENDAR_YEAR - 1))
+          else
+            CFB_YEAR=$CALENDAR_YEAR
+          fi
+
+          echo "CFB_YEAR=$CFB_YEAR" >> "$GITHUB_ENV"
+          echo "Current CFB season: $CFB_YEAR"
+
       - name: Check out private autostat repo
         uses: actions/checkout@v4
 
