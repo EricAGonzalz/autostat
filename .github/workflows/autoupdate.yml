@@ -57,8 +57,7 @@ jobs:
       - name: Recalculate rankings
         run: python autostat.py
 
-      - name: Archive daily snapshot
-        if: github.event_name == 'schedule' && github.event.schedule == '7 10 * * *'
+      - name: Update weekly history
         run: python autostat.py --archive-week
 
       - name: Copy updated files to public repo
