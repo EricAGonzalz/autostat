@@ -977,16 +977,23 @@ def add_luck(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def get_latest_completed_fbs_week(games: list):
+def get_current_fbs_history_week(games: list):
     """
-    Return the highest completed week number containing an FBS-vs-FBS game.
+    Return the highest history week that has actually started in FBS-vs-FBS play.
+
+    Regular-season games use their CFBD week number directly. Postseason games
+    are shifted after the 14-week regular-season frame so they cannot overwrite
+    regular-season history if CFBD resets postseason week numbering to Week 1.
+
+    Future games are ignored, so a future week's scheduled games cannot cause
+    history to advance before that week has actually started. Using the highest
+    started history week also prevents a late rescheduled game carrying an older
+    CFBD week number from moving history backward.
     """
-    completed_weeks = []
+    now = datetime.now(timezone.utc)
+    started_games = []
 
     for game in games:
-        if game.get("completed") is not True:
-            continue
-
         home_conf = game.get("homeConference")
         away_conf = game.get("awayConference")
 
@@ -994,26 +1001,60 @@ def get_latest_completed_fbs_week(games: list):
             continue
 
         week = game.get("week")
-        if week is None:
+        start_date = game.get("startDate") or game.get("start_date") or game.get("startTime")
+
+        if week is None or not start_date:
             continue
 
         try:
-            completed_weeks.append(int(week))
+            raw_week = int(week)
+            start_time = datetime.fromisoformat(str(start_date).replace("Z", "+00:00"))
         except (TypeError, ValueError):
             continue
 
-    return max(completed_weeks) if completed_weeks else None
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        else:
+            start_time = start_time.astimezone(timezone.utc)
+
+        if start_time > now:
+            continue
+
+        season_type = str(game.get("seasonType") or game.get("season_type") or "regular").lower()
+        history_week = 14 + raw_week if season_type == "postseason" else raw_week
+
+        started_games.append({
+            "start_time": start_time,
+            "history_week": history_week,
+            "raw_week": raw_week,
+            "season_type": season_type,
+            "home": game.get("homeTeam") or "",
+            "away": game.get("awayTeam") or "",
+        })
+
+    if not started_games:
+        return None, None
+
+    current_week = max(item["history_week"] for item in started_games)
+    current_week_games = [
+        item for item in started_games
+        if item["history_week"] == current_week
+    ]
+    source = max(current_week_games, key=lambda item: item["start_time"])
+    return current_week, source
 
 
 def archive_weekly_snapshot():
     """
-    Archive the current Master.csv as the latest completed FBS week.
+    Archive the current Master.csv to the active FBS history week.
 
     Automatically creates:
         data/history/<YEAR>/Week XX.csv
         data/<YEAR> History.csv
 
-    Re-running the same week replaces that week's rows instead of duplicating them.
+    The active history week is the highest FBS history week that has actually
+    started. Re-running the same week replaces that week's rows instead
+    of duplicating them, allowing history to refresh on every rankings update.
     """
     data_dir = "data"
     master_file = os.path.join(data_dir, f"{YEAR} Master.csv")
@@ -1028,11 +1069,20 @@ def archive_weekly_snapshot():
         f"https://api.collegefootballdata.com/games?year={YEAR}&seasonType=both"
     )
 
-    week = get_latest_completed_fbs_week(games)
+    week, week_source = get_current_fbs_history_week(games)
 
     if week is None:
         raise SystemExit(
-            "No completed FBS-vs-FBS week could be identified for archiving."
+            "No started FBS-vs-FBS week could be identified for history."
+        )
+
+    print(f"Current FBS history week detected: Week {week}")
+    if week_source is not None:
+        print(
+            "History week source: "
+            f"{week_source['away']} at {week_source['home']} | "
+            f"CFBD {week_source['season_type']} Week {week_source['raw_week']} | "
+            f"start {week_source['start_time'].isoformat()}"
         )
 
     history_dir = os.path.join(data_dir, "history", str(YEAR))
@@ -1099,7 +1149,7 @@ def archive_weekly_snapshot():
 
     history.to_csv(history_file, index=False)
 
-    print(f"Archived completed Week {week}.")
+    print(f"Updated history Week {week}.")
     print(f"Weekly snapshot: {weekly_file}")
     print(f"Cumulative history: {history_file}")
 
@@ -1438,12 +1488,12 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Calculate CFB efficiency rankings or archive the latest completed week."
+        description="Calculate CFB efficiency rankings or update the active weekly history snapshot."
     )
     parser.add_argument(
         "--archive-week",
         action="store_true",
-        help="Archive the current Master.csv as the latest completed FBS week."
+        help="Update weekly history from the current Master.csv using the active FBS week."
     )
     args = parser.parse_args()
 
