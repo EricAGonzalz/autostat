@@ -24,8 +24,14 @@ FBS_CONFERENCES = {
 # CollegeFootballData API. TIMEOUT controls how long an API request may wait
 # before being treated as failed.
 # GitHub Actions can override the season with the CFB_YEAR environment variable.
-# Locally, this defaults to 2026 if CFB_YEAR is not set.
-YEAR = int(os.environ.get("CFB_YEAR", "2026"))
+# If no override is provided, determine the college-football season automatically.
+# January bowl/CFP games still belong to the previous calendar year's season.
+def get_current_cfb_season() -> int:
+    now = datetime.now(timezone.utc)
+    return now.year - 1 if now.month == 1 else now.year
+
+
+YEAR = int(os.environ.get("CFB_YEAR", str(get_current_cfb_season())))
 
 # Never store the CollegeFootballData API key in source control.
 # In GitHub, create an Actions secret named CFBD_API_KEY.
@@ -977,13 +983,14 @@ def add_luck(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def get_current_fbs_history_week(games: list):
+def get_current_fbs_history_week(games: list, calendar: list):
     """
     Return the highest history week that has actually started in FBS-vs-FBS play.
 
     Regular-season games use their CFBD week number directly. Postseason games
-    are shifted after the 14-week regular-season frame so they cannot overwrite
-    regular-season history if CFBD resets postseason week numbering to Week 1.
+    are shifted after the actual final regular-season week reported by CFBD's
+    season calendar, so postseason numbering cannot overwrite regular-season
+    history if CFBD resets postseason week numbering to Week 1.
 
     Future games are ignored, so a future week's scheduled games cannot cause
     history to advance before that week has actually started. Using the highest
@@ -992,6 +999,59 @@ def get_current_fbs_history_week(games: list):
     """
     now = datetime.now(timezone.utc)
     started_games = []
+
+    # Determine the regular-season offset from CFBD's own calendar instead of
+    # assuming that every season ends at Week 14.
+    regular_calendar_weeks = []
+
+    for entry in calendar or []:
+        season_type = str(
+            entry.get("seasonType")
+            or entry.get("season_type")
+            or ""
+        ).lower()
+
+        if season_type != "regular":
+            continue
+
+        try:
+            regular_calendar_weeks.append(int(entry.get("week")))
+        except (TypeError, ValueError):
+            continue
+
+    if regular_calendar_weeks:
+        max_regular_week = max(regular_calendar_weeks)
+    else:
+        # Defensive fallback: if the calendar endpoint is unexpectedly empty,
+        # derive the offset from the season's regular-season game records.
+        regular_game_weeks = []
+
+        for game in games:
+            season_type = str(
+                game.get("seasonType")
+                or game.get("season_type")
+                or "regular"
+            ).lower()
+
+            if season_type != "regular":
+                continue
+
+            try:
+                regular_game_weeks.append(int(game.get("week")))
+            except (TypeError, ValueError):
+                continue
+
+        if not regular_game_weeks:
+            raise SystemExit(
+                "Could not determine the final regular-season week for history."
+            )
+
+        max_regular_week = max(regular_game_weeks)
+
+    print(
+        f"CFBD regular-season history offset: Week {max_regular_week} "
+        f"is the final regular-season week."
+    )
 
     for game in games:
         home_conf = game.get("homeConference")
@@ -1021,7 +1081,11 @@ def get_current_fbs_history_week(games: list):
             continue
 
         season_type = str(game.get("seasonType") or game.get("season_type") or "regular").lower()
-        history_week = 14 + raw_week if season_type == "postseason" else raw_week
+
+        if season_type == "postseason":
+            history_week = max_regular_week + raw_week
+        else:
+            history_week = raw_week
 
         started_games.append({
             "start_time": start_time,
@@ -1069,7 +1133,11 @@ def archive_weekly_snapshot():
         f"https://api.collegefootballdata.com/games?year={YEAR}&seasonType=both"
     )
 
-    week, week_source = get_current_fbs_history_week(games)
+    calendar = get_json(
+        f"https://api.collegefootballdata.com/calendar?year={YEAR}"
+    )
+
+    week, week_source = get_current_fbs_history_week(games, calendar)
 
     if week is None:
         raise SystemExit(
