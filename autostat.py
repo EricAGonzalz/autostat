@@ -1393,8 +1393,10 @@ def main():
     #   Rk      = rank by raw Net Rating
     #   AdjRtg  = adjusted efficiency margin, AdjO - AdjD
     #   AdjRk   = rank by adjusted efficiency margin
-    #   Ortg    = points scored per 100 offensive drives
-    #   DRtg    = points allowed per 100 defensive drives
+    #   Ortg    = raw points scored per 100 offensive drives
+    #   DRtg    = raw points allowed per 100 defensive drives
+    #   AdjO    = opponent-adjusted offensive points per 100 drives
+    #   AdjD    = opponent-adjusted defensive points allowed per 100 drives
     #   OppSOS  = average AdjEM of opponents
     #   SOSRk   = rank by OppSOS
     #   Luck    = actual Win % minus expected Pythagorean Win %
@@ -1425,7 +1427,7 @@ def main():
         "Rk", "Team", "Conference", "W", "L",
         "NetRtg", "AdjRtg", "AdjRk",
         "Win %", "PyW %", "Luck", "Luck Z",
-        "Ortg", "DRtg", "PF", "PA",
+        "Ortg", "DRtg", "AdjO", "AdjD", "PF", "PA",
         "ODrives", "DDrives", "SOS", "SOS rank",
     ]
     cols = [c for c in cols if c in ratings_df.columns]
@@ -1456,6 +1458,8 @@ def main():
         "Luck Z",
         "Ortg",
         "DRtg",
+        "AdjO",
+        "AdjD",
         "SOS",
     ]
 
