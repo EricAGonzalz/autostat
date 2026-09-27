@@ -640,7 +640,7 @@ def aggregate_game_drives(drives_raw: list, fbs_teams: set) -> dict:
 #
 # Offensive Rating:
 #
-#     Ortg = 100 * Points For / Offensive Drives
+#     ORtg = 100 * Points For / Offensive Drives
 #
 # This is the number of points a team scores per 100 offensive drives.
 #
@@ -653,7 +653,7 @@ def aggregate_game_drives(drives_raw: list, fbs_teams: set) -> dict:
 #
 # Net Rating:
 #
-#     Net Rating = Ortg - DRtg
+#     Net Rating = ORtg - DRtg
 #
 # A positive value means the team scores more points per 100 drives than it
 # allows. A larger positive value therefore represents stronger performance.
@@ -1208,7 +1208,7 @@ def build_schedule_csv(games: list, ratings_df: pd.DataFrame, data_dir: str):
     current = ratings_df.copy()
 
     # Coerce ranking metrics for safe lookups.
-    for column in ["Rk", "AdjRk", "AdjRtg", "NetRtg", "Ortg", "DRtg"]:
+    for column in ["Rk", "AdjRk", "AdjRtg", "NetRtg", "ORtg", "DRtg"]:
         if column in current.columns:
             current[column] = pd.to_numeric(current[column], errors="coerce")
 
@@ -1393,7 +1393,7 @@ def main():
     #   Rk      = rank by raw Net Rating
     #   AdjRtg  = adjusted efficiency margin, AdjO - AdjD
     #   AdjRk   = rank by adjusted efficiency margin
-    #   Ortg    = raw points scored per 100 offensive drives
+    #   ORtg    = raw points scored per 100 offensive drives
     #   DRtg    = raw points allowed per 100 defensive drives
     #   AdjO    = opponent-adjusted offensive points per 100 drives
     #   AdjD    = opponent-adjusted defensive points allowed per 100 drives
@@ -1412,7 +1412,7 @@ def main():
         "win_pct": "Win %",
         "Pyth Win Pct": "PyW %",
         "Luck Z": "Luck Z",
-        "off_rating": "Ortg",
+        "off_rating": "ORtg",
         "def_rating": "DRtg",
         "points_for": "PF",
         "points_against": "PA",
@@ -1427,7 +1427,7 @@ def main():
         "Rk", "Team", "Conference", "W", "L",
         "NetRtg", "AdjRtg", "AdjRk",
         "Win %", "PyW %", "Luck", "Luck Z",
-        "Ortg", "DRtg", "AdjO", "AdjD", "PF", "PA",
+        "ORtg", "DRtg", "AdjO", "AdjD", "PF", "PA",
         "ODrives", "DDrives", "SOS", "SOS rank",
     ]
     cols = [c for c in cols if c in ratings_df.columns]
@@ -1441,7 +1441,7 @@ def main():
     #
     # Rk = 1 corresponds to the highest:
     #
-    #     Net Rating = Ortg - DRtg
+    #     Net Rating = ORtg - DRtg
     #
     # The adjusted ranking is still preserved separately in AdjRk.
     ratings_df = ratings_df.sort_values("Rk", ascending=True).reset_index(drop=True)
@@ -1456,7 +1456,7 @@ def main():
         "PyW %",
         "Luck",
         "Luck Z",
-        "Ortg",
+        "ORtg",
         "DRtg",
         "AdjO",
         "AdjD",
