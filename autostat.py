@@ -564,24 +564,31 @@ def offensive_drive_points(drive: dict) -> int:
 
 
 def _play_scoring_kind(play):
-    """Classify a scoring play conservatively (never guess on unknown returns)."""
-    label = (str(play.get("playType") or "") + " " + str(play.get("playText") or "")).upper()
-    if any(x in label for x in ("INTERCEPTION", "INTERCEPTED", "FUMBLE RETURN", "PUNT RETURN", "KICKOFF RETURN", "KICK RETURN", "BLOCKED PUNT", "BLOCKED FIELD", "BLOCKED FG")):
+    """Classify scoring unit, not merely whether the possession scored."""
+    kind = str(play.get("playType") or "").upper()
+    description = str(play.get("playText") or "").upper()
+    text = kind + " " + description
+    # A generic INT/PUNT play does not necessarily mean a return touchdown.
+    if any(word in text for word in (
+        "INTERCEPTION RETURN TOUCHDOWN", "INTERCEPTION RETURN FOR A TOUCHDOWN",
+        "INTERCEPTED", "PICK SIX", "PICK-SIX", "FUMBLE RETURN TOUCHDOWN",
+        "FUMBLE RECOVERY TOUCHDOWN", "PUNT RETURN TOUCHDOWN",
+        "KICKOFF RETURN TOUCHDOWN", "KICK RETURN TOUCHDOWN",
+        "BLOCKED PUNT RETURN", "BLOCKED FIELD GOAL RETURN",
+    )):
         return "non_offense"
-    if "SAFETY" in label:
+    if "SAFETY" in text:
         return "non_offense"
-    if any(x in label for x in ("PASSING TD", "RUSHING TD", "PASSING TOUCHDOWN", "RUSHING TOUCHDOWN", "PASS COMPLETE", "PASS INCOMPLETE", "RUSH", "RUN", "FIELD GOAL", "FG GOOD", "TOUCHDOWN")):
+    if "FIELD GOAL" in text or "FG GOOD" in text or "FG MADE" in text:
+        return "offense"
+    if any(t in text for t in ("RUSHING TD", "PASSING TD", "RUSHING TOUCHDOWN",
+                               "PASSING TOUCHDOWN", "TOUCHDOWN", "PASS", "RUSH", "RUN")):
         return "offense"
     return "unknown"
 
 
 def _play_reconcile(games_for_week, all_games, year):
-    """Fetch historic plays for a week once, partitioning by game.
-
-    CFBD play scores can be recorded before or after a play. Use neighboring
-    scoreboard values to identify scoring boundaries; avoid guessing where
-    the play boundary is uncertain. This resolver is intentionally conservative.
-    """
+    """Download only necessary weeks of play-by-play (at most once each)."""
     from collections import defaultdict
     weeks = set()
     for game in games_for_week:
@@ -600,73 +607,98 @@ def _play_reconcile(games_for_week, all_games, year):
 
 
 def _points_from_plays(game, plays):
-    """Conservatively attribute touchdowns/FGs from official scoring plays.
+    """Reconcile play-by-play scoreboard *transitions*, not scoring flags alone.
 
-    Scoring play fields and score snapshots vary by data source. Only accept
-    scores that can be attributed without ambiguity and reconcile to the final.
+    Historical score snapshots may record values before or after the play.
+    Scoring flags can be missing or can omit the conversion, so interpret the
+    score change between successive snapshots and locate the matching event.
+    Unknown attribution still raises rather than silently corrupting rankings.
     """
     home, away = game["homeTeam"], game["awayTeam"]
     totals = {home: 0, away: 0}
     if not plays:
         raise ValueError("no play-by-play returned for game")
-    # Historical play rows are normally ordered by play number from the API.
-    # Keep provider order: IDs and clocks cannot safely reorder OT and penalties.
-    scoring = [p for p in plays if p.get("scoring") is True]
-    if not scoring:
-        if float(game["homePoints"]) or float(game["awayPoints"]):
-            raise ValueError("no scoring plays despite nonzero final score")
-        return totals
-    # Identify the scoring team's point changes using adjacent snapshots.
-    # We require a definite attribution of both the scoring unit and points.
-    for i, p in enumerate(plays):
-        if p.get("scoring") is not True:
-            continue
-        offense, defense = p.get("offense"), p.get("defense")
-        if offense not in totals or defense not in totals or offense == defense:
-            raise ValueError("scoring play has unknown teams")
-        kind = _play_scoring_kind(p)
-        if kind == "unknown":
-            raise ValueError(f"unknown scoring play type {p.get('playType')!r}")
-        # Prefer the score change across this and the immediately following play,
-        # since CFBD frequently records pre-play rather than post-play scores.
-        curr = p
-        nxt = plays[i+1] if i+1 < len(plays) else None
-        prev = plays[i-1] if i else None
-        def absolute_score(row, team):
-            if not row:
-                return None
-            if row.get("offense") == team:
-                return row.get("offenseScore")
-            if row.get("defense") == team:
-                return row.get("defenseScore")
+
+    def score(row):
+        offense, defense = row.get("offense"), row.get("defense")
+        if {offense, defense} != {home, away}:
             return None
-        points = None
-        for start, end in ((curr, nxt), (prev, curr)):
-            if start is None or end is None:
-                continue
-            try:
-                od = int(absolute_score(end, offense)) - int(absolute_score(start, offense))
-                dd = int(absolute_score(end, defense)) - int(absolute_score(start, defense))
-            except (TypeError, ValueError):
-                continue
-            if od > 0 and dd == 0 and od <= 8:
-                points = (offense, od)
-                break
-            if dd > 0 and od == 0 and dd <= 8:
-                points = (defense, dd)
-                break
-        if points is None:
-            raise ValueError("cannot isolate points at scoring play")
-        scorer, n = points
-        if kind == "offense" and scorer == offense:
-            totals[offense] += n
-        elif kind == "non_offense":
+        try:
+            o, d = int(row["offenseScore"]), int(row["defenseScore"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return {offense: o, defense: d}
+
+    # Score-change events, independently of `scoring` metadata.
+    snapshots = [(i, score(p)) for i, p in enumerate(plays)]
+    snapshots = [(i, snap) for i, snap in snapshots if snap is not None]
+    if not snapshots:
+        raise ValueError("no usable play score snapshots")
+
+    def candidates_for_transition(left, right):
+        # A snapshot may reflect the score just before or after the play.
+        # Search a tight window around the transition, preserving API order.
+        positions = range(max(0, left - 1), min(len(plays), right + 2))
+        return [(j, plays[j]) for j in positions]
+
+    # Some games contain a first-play scoring snapshot; it must start at zero.
+    first = snapshots[0][1]
+    if first[home] != 0 or first[away] != 0:
+        raise ValueError("play snapshots do not begin at 0-0")
+
+    previous_idx, previous = snapshots[0]
+    transitions = 0
+    for index, current in snapshots[1:]:
+        delta = {team: current[team] - previous[team] for team in (home, away)}
+        if any(v < 0 for v in delta.values()):
+            raise ValueError("play scoreboard decreased")
+        changed = [(team, n) for team, n in delta.items() if n > 0]
+        if not changed:
+            previous_idx, previous = index, current
             continue
+        if len(changed) != 1:
+            raise ValueError("both scoreboard totals changed between play records")
+        scorer, points = changed[0]
+        transitions += 1
+        if points > 8:
+            raise ValueError(f"score jump of {points} cannot be assigned to one event")
+
+        nearby = candidates_for_transition(previous_idx, index)
+        # Give a scoring-flagged play priority; an unflagged scoring play may
+        # nevertheless be recoverable from its play description.
+        matches = []
+        for j, play in nearby:
+            unit = _play_scoring_kind(play)
+            if unit == "unknown":
+                continue
+            offense = play.get("offense")
+            defense = play.get("defense")
+            expected = offense if unit == "offense" else defense
+            if expected != scorer:
+                continue
+            priority = (0 if play.get("scoring") is True else 1,
+                        abs(j - previous_idx), j)
+            matches.append((priority, unit, j))
+        if matches:
+            matches.sort(key=lambda row: row[0])
+            unit = matches[0][1]
+            if unit == "offense":
+                totals[scorer] += points
         else:
-            raise ValueError("scoring unit mismatch in play-by-play")
-    for team, final in ((home, game["homePoints"]), (away, game["awayPoints"])):
-        if totals[team] > float(final):
-            raise ValueError("play-by-play offensive points exceed scoreboard")
+            # Extra points, 2pt attempts and penalty scores may be separate
+            # from the TD play. A +1/+2 transition is attributed only if we
+            # can carry forward a clear prior touchdown scoring unit.
+            raise ValueError(f"cannot attribute {points}-point scoring transition at play {index}")
+        previous_idx, previous = index, current
+
+    # Strong reconciliation: the recorded scoreboard must reach the official
+    # final total. If it doesn't, never treat missing scores as zero.
+    last = snapshots[-1][1]
+    if any(last[team] != int(game["homePoints" if team == home else "awayPoints"])
+           for team in (home, away)):
+        raise ValueError("play-by-play scoreboard does not reach final score")
+    if transitions == 0 and (last[home] or last[away]):
+        raise ValueError("no score transitions despite nonzero final")
     return totals
 
 
