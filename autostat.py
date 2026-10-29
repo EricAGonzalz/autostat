@@ -759,6 +759,35 @@ def calculate_offensive_scoring(games: list, drives_raw: list):
                       "HomeNonOffensivePoints": int(game["homePoints"]) - totals[home],
                       "AttributionSource": source})
     if rejected:
+        # Preserve the exact CFBD payloads needed to reproduce attribution errors.
+        # This audit is written BEFORE strict validation aborts the job.
+        debug_dir = os.path.join("data", "scoring_diagnostics")
+        os.makedirs(debug_dir, exist_ok=True)
+        rejected_ids = {r[0] for r in rejected}
+        report = []
+        for bad_gid, away, home, reason in rejected:
+            game = next((g for g, gid, ds in eligible if gid == bad_gid), None)
+            drives = next((ds for g, gid, ds in eligible if gid == bad_gid), [])
+            plays = plays_by_game.get(bad_gid, [])
+            report.append({
+                "game_id": bad_gid, "away": away, "home": home, "reason": reason,
+                "away_score": None if game is None else game.get("awayPoints"),
+                "home_score": None if game is None else game.get("homePoints"),
+                "drive_count": len(drives), "play_count": len(plays),
+            })
+        summary_path = os.path.join(debug_dir, f"{YEAR}_rejected_games.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, ensure_ascii=False)
+        # A small number of full raw records is sufficient for debugging and
+        # avoids flooding GitHub Actions logs with thousands of play rows.
+        for bad_gid, away, home, reason in rejected[:3]:
+            game = next((g for g, gid, ds in eligible if gid == bad_gid), None)
+            drives = next((ds for g, gid, ds in eligible if gid == bad_gid), [])
+            sample = {"game": game, "reason": reason, "drives": drives,
+                      "plays": plays_by_game.get(bad_gid, [])}
+            with open(os.path.join(debug_dir, f"game_{bad_gid}.json"), "w", encoding="utf-8") as handle:
+                json.dump(sample, handle, indent=2, ensure_ascii=False, default=str)
+        print(f"Scoring diagnostics saved: {summary_path} and first 3 rejected games")
         print(f"WARNING: {len(rejected)} completed FBS games still ambiguous")
         for row in rejected[:30]:
             print("  Rejected:", *row)
