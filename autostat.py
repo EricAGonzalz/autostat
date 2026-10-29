@@ -487,318 +487,48 @@ def merge_live_games(games: list,
 
 
 
-def get_points(games: list, scoring_by_game: dict = None) -> pd.DataFrame:
-    """Return offensive-drive scoring totals, or scoreboard totals for legacy callers.
-
-    When scoring_by_game is supplied, values are points scored by the offense
-    on its own possessions. Defensive and special-team return touchdowns are
-    excluded from both offensive points and opponent defensive points allowed.
-    """
+def get_points(games: list) -> pd.DataFrame:
+    """Return each FBS team's total points scored and allowed in games against other FBS teams."""
     team_totals = {}
     for g in games:
-        home, away = g.get("homeTeam"), g.get("awayTeam")
-        home_conf, away_conf = g.get("homeConference"), g.get("awayConference")
+        home = g.get("homeTeam")
+        away = g.get("awayTeam")
+        home_conf = g.get("homeConference")
+        away_conf = g.get("awayConference")
+
         if home_conf not in FBS_CONFERENCES or away_conf not in FBS_CONFERENCES:
             continue
-        if g.get("homePoints") is None or g.get("awayPoints") is None:
+
+        home_pts = g.get("homePoints")
+        away_pts = g.get("awayPoints")
+
+        # Ignore future/scheduled games that do not yet have a score.
+        if home_pts is None or away_pts is None:
             continue
-        gid = str(g.get("id"))
-        if scoring_by_game is not None:
-            if gid not in scoring_by_game:
-                continue  # no incomplete games in the ratings denominator
-            home_pts = scoring_by_game[gid].get(home, 0)
-            away_pts = scoring_by_game[gid].get(away, 0)
-        else:
-            home_pts, away_pts = float(g["homePoints"]), float(g["awayPoints"])
-        for team, conf, pf, pa in ((home, home_conf, home_pts, away_pts),
-                                   (away, away_conf, away_pts, home_pts)):
-            if not team:
-                continue
-            row = team_totals.setdefault(team, {"team": team, "conference": conf,
-                                                "points_for": 0.0, "points_against": 0.0})
-            row["points_for"] += pf
-            row["points_against"] += pa
-    df = pd.DataFrame(team_totals.values(), columns=["team", "conference", "points_for", "points_against"])
+
+        if home:
+            if home not in team_totals:
+                team_totals[home] = {
+                    "team": home, "conference": home_conf,
+                    "points_for": 0.0, "points_against": 0.0,
+                }
+            team_totals[home]["points_for"] += float(home_pts)
+            team_totals[home]["points_against"] += float(away_pts)
+
+        if away:
+            if away not in team_totals:
+                team_totals[away] = {
+                    "team": away, "conference": away_conf,
+                    "points_for": 0.0, "points_against": 0.0,
+                }
+            team_totals[away]["points_for"] += float(away_pts)
+            team_totals[away]["points_against"] += float(home_pts)
+
+    df = pd.DataFrame(team_totals.values())
+    print("points_df shape (ALL):", df.shape)
+    df = df[df["conference"].isin(FBS_CONFERENCES)].reset_index(drop=True)
     print("points_df shape (FBS ONLY):", df.shape)
     return df
-
-
-# In the CFBD /drives endpoint these fields are scores at the beginning/end of
-# each possession, from the perspective of the team that possessed the ball.
-# A positive offense-score delta is NOT proof of an offensive score if the
-# drive result identifies a return/special-teams play. Validate result first.
-_NON_OFFENSIVE_RESULTS = (
-    "INTERCEPTION RETURN", "INT RETURN", "PICK SIX", "PICK-SIX",
-    "FUMBLE RETURN", "DEFENSIVE TOUCHDOWN", "DEFENSIVE TD",
-    "PUNT RETURN", "KICK RETURN", "KICKOFF RETURN", "BLOCKED PUNT",
-    "BLOCKED FIELD GOAL", "BLOCKED FG", "SAFETY", "RETURN TOUCHDOWN",
-)
-
-
-def offensive_drive_points(drive: dict) -> int:
-    """Identify points earned by the offense on its own possession.
-
-    Raises ValueError rather than silently treating absent score fields as 0.
-    """
-    required = ("startOffenseScore", "endOffenseScore",
-                "startDefenseScore", "endDefenseScore")
-    missing = [key for key in required if drive.get(key) is None]
-    if missing:
-        raise ValueError("drive missing " + ", ".join(missing))
-    start_o, end_o = int(drive["startOffenseScore"]), int(drive["endOffenseScore"])
-    start_d, end_d = int(drive["startDefenseScore"]), int(drive["endDefenseScore"])
-    delta_o, delta_d = end_o - start_o, end_d - start_d
-    if min(delta_o, delta_d) < 0:
-        raise ValueError("drive score decreased")
-    result = str(drive.get("driveResult") or drive.get("result") or "").upper()
-    if any(token in result for token in _NON_OFFENSIVE_RESULTS):
-        if delta_o > 0:
-            raise ValueError(f"non-offensive drive result {result!r} with +{delta_o} offense points")
-        return 0
-    if delta_o > 0 and not any(token in result for token in ("TOUCHDOWN", "TD", "FIELD GOAL", "FG", "END OF HALF", "END OF GAME", "END OF 2ND", "END OF 4TH", "END OF PERIOD")):
-        # Missing or unusual drive-result labels should be reviewed rather than guessed.
-        raise ValueError(f"unrecognized offensive-scoring result {result!r} (+{delta_o})")
-    if delta_o > 8:
-        raise ValueError(f"unexpected {delta_o} points on one drive")
-    return delta_o
-
-
-def _play_scoring_kind(play):
-    """Determine who earned points. A generic pass/punt/INT is NOT a score."""
-    kind = str(play.get("playType") or "").upper()
-    desc = str(play.get("playText") or "").upper()
-    text = kind + " " + desc
-    if any(word in text for word in (
-        "PUNT RETURN TOUCHDOWN", "PUNT RETURN TD", "KICKOFF RETURN TOUCHDOWN",
-        "KICK RETURN TOUCHDOWN", "INTERCEPTION RETURN TOUCHDOWN",
-        "INTERCEPTION RETURN TD", "PICK SIX", "PICK-SIX",
-        "FUMBLE RETURN TOUCHDOWN", "FUMBLE RECOVERY TOUCHDOWN",
-        "BLOCKED PUNT TOUCHDOWN", "BLOCKED FIELD GOAL TOUCHDOWN",
-        "SAFETY", "INTERCEPTION RETURN FOR A TOUCHDOWN",
-    )):
-        return "non_offense"
-    if "INTERCEPT" in text and ("TOUCHDOWN" in text or " TD" in text):
-        return "non_offense"
-    if "FUMBLE" in text and ("RETURN" in text or "RECOVER" in text) and ("TOUCHDOWN" in text or " TD" in text):
-        return "non_offense"
-    if ("PUNT" in kind or "KICKOFF" in kind) and ("TOUCHDOWN" in text or " TD" in text):
-        return "non_offense"
-    if "FIELD GOAL" in text or "FG GOOD" in text or "FG MADE" in text:
-        if "BLOCK" not in text and "MISSED" not in text and "NO GOOD" not in text:
-            return "offense"
-    if any(word in text for word in ("RUSHING TD", "PASSING TD", "RUSHING TOUCHDOWN",
-                                      "PASSING TOUCHDOWN", "RUN TOUCHDOWN")):
-        return "offense"
-    if "TOUCHDOWN" in text or " TD" in text:
-        if any(x in text for x in ("PUNT", "KICKOFF", "RETURN", "INTERCEPT", "BLOCKED")):
-            return "unknown"
-        return "offense"
-    return "unknown"
-
-
-def _play_reconcile(games_for_week, all_games, year):
-    """Fetch relevant weeks; do not rely on a scoring-play-only filter."""
-    from collections import defaultdict
-    weeks = {(str(g.get("seasonType") or "regular").lower(), int(g["week"]))
-             for g in games_for_week if g.get("week") is not None}
-    result = defaultdict(list)
-    for season_type, week in sorted(weeks):
-        url = ("https://api.collegefootballdata.com/plays"
-               f"?year={year}&week={week}&seasonType={season_type}")
-        print(f"Fetching scoring plays to resolve ambiguous drives: {season_type} Week {week}")
-        for play in get_json(url):
-            gid = play.get("gameId")
-            if gid is not None:
-                result[str(gid)].append(play)
-    return result
-
-
-def _points_from_plays(game, plays):
-    """Score attribution from in-order scoreboard transitions and nearby scoring plays.
-
-    A score snapshot can be before/after a play; a PAT may appear in a later
-    snapshot. Never assume a generic pass, interception or punt is scoring.
-    Fail closed when the scorer/unit cannot be established.
-    """
-    home, away = game["homeTeam"], game["awayTeam"]
-    teams = (home, away)
-    if not plays:
-        raise ValueError("no play-by-play returned for game")
-    totals = {home: 0, away: 0}
-
-    def snapshot(play):
-        off, deff = play.get("offense"), play.get("defense")
-        if {off, deff} != set(teams):
-            return None
-        try:
-            return {off: int(play["offenseScore"]), deff: int(play["defenseScore"])}
-        except (ValueError, TypeError, KeyError):
-            return None
-
-    snapshots = [(i, x) for i, p in enumerate(plays) if (x := snapshot(p)) is not None]
-    if not snapshots:
-        raise ValueError("no usable play score snapshots")
-    last = snapshots[-1][1]
-    if any(last[t] != int(game["homePoints" if t == home else "awayPoints"]) for t in teams):
-        raise ValueError("play-by-play scoreboard does not reach final score")
-    if snapshots[0][1] != {home: 0, away: 0}:
-        raise ValueError("play-by-play scoreboard does not start at zero")
-
-    prev_index, prev_score = snapshots[0]
-    last_td_unit = {home: None, away: None}
-    used = set()
-    for current_index, score in snapshots[1:]:
-        changes = [(t, score[t] - prev_score[t]) for t in teams if score[t] != prev_score[t]]
-        prev_index, previous_index = current_index, prev_index
-        prev_score = score
-        if not changes:
-            continue
-        if len(changes) != 1 or changes[0][1] < 0 or changes[0][1] > 8:
-            raise ValueError(f"score transition ambiguous at play {current_index}: {changes}")
-        scorer, points = changes[0]
-        # A conversion often has a one/two-point delta with no dedicated
-        # scoring play; attribute it to the unit that just scored a TD.
-        if points in (1, 2) and last_td_unit[scorer] is not None:
-            if last_td_unit[scorer] == "offense":
-                totals[scorer] += points
-            last_td_unit[scorer] = None
-            continue
-        # If the score snapshot is pre-play, the scoring record may be at the
-        # subsequent index; if post-play, it is at/before current_index.
-        candidates = []
-        for j in range(max(0, previous_index - 1), min(len(plays), current_index + 4)):
-            if j in used:
-                continue
-            play = plays[j]
-            unit = _play_scoring_kind(play)
-            if unit == "unknown":
-                continue
-            off, deff = play.get("offense"), play.get("defense")
-            if (off if unit == "offense" else deff) != scorer:
-                continue
-            # Never treat a generic rushing / passing play as evidence.
-            priority = (0 if play.get("scoring") is True else 1,
-                        abs(j - current_index), j)
-            candidates.append((priority, j, unit))
-        if not candidates:
-            raise ValueError(f"cannot identify scoring unit for {points} points at play {current_index}")
-        candidates.sort()
-        _, chosen_index, unit = candidates[0]
-        used.add(chosen_index)
-        if unit == "offense":
-            totals[scorer] += points
-        if points >= 6:
-            last_td_unit[scorer] = unit
-        else:
-            last_td_unit[scorer] = None
-    return totals
-
-
-def calculate_offensive_scoring(games: list, drives_raw: list):
-    """Validated offensive-only scoring, with play-by-play fallback."""
-    from collections import defaultdict
-    by_game = defaultdict(list)
-    for drive in drives_raw:
-        gid = drive.get("gameId", drive.get("game_id", drive.get("gameID")))
-        if gid is not None:
-            by_game[str(gid)].append(drive)
-    result, selected_drives, audit, rejected = {}, [], [], []
-    eligible = []
-    for game in games:
-        if game.get("completed") is not True:
-            continue
-        home, away = game.get("homeTeam"), game.get("awayTeam")
-        if (game.get("homeConference") not in FBS_CONFERENCES or
-                game.get("awayConference") not in FBS_CONFERENCES or
-                game.get("homePoints") is None or game.get("awayPoints") is None):
-            continue
-        gid = str(game.get("id"))
-        drives = [d for d in by_game[gid] if d.get("offense") in (home, away)
-                  and d.get("defense") in (home, away)]
-        eligible.append((game, gid, drives))
-    preliminary = {}
-    needs_reconcile = []
-    for game, gid, drives in eligible:
-        home, away = game["homeTeam"], game["awayTeam"]
-        totals = {home: 0, away: 0}
-        try:
-            seen = set()
-            for drive in drives:
-                offense = drive["offense"]
-                seen.add(offense)
-                totals[offense] += offensive_drive_points(drive)
-            if seen != {home, away}:
-                raise ValueError("missing drive data for one or both teams")
-            if any(totals[t] > float(game[p]) for t, p in ((home, "homePoints"), (away, "awayPoints"))):
-                raise ValueError("offensive drive points exceed final score")
-            preliminary[gid] = (totals, "drives")
-        except (ValueError, KeyError, TypeError) as exc:
-            needs_reconcile.append((game, gid, str(exc)))
-    plays_by_game = {}
-    if needs_reconcile:
-        plays_by_game = _play_reconcile([g for g, _, _ in needs_reconcile], games, YEAR)
-    for game, gid, drives in eligible:
-        home, away = game["homeTeam"], game["awayTeam"]
-        try:
-            if gid in preliminary:
-                totals, source = preliminary[gid]
-            else:
-                totals = _points_from_plays(game, plays_by_game.get(gid, []))
-                source = "plays"
-            if not drives or {d.get("offense") for d in drives} != {home, away}:
-                raise ValueError("missing drive counts")
-        except (ValueError, KeyError, TypeError) as exc:
-            rejected.append((gid, away, home, str(exc)))
-            continue
-        result[gid] = totals
-        selected_drives.extend(drives)
-        audit.append({"GameId": gid, "Away": away, "Home": home,
-                      "AwayScore": int(game["awayPoints"]), "HomeScore": int(game["homePoints"]),
-                      "AwayOffensivePoints": totals[away], "HomeOffensivePoints": totals[home],
-                      "AwayNonOffensivePoints": int(game["awayPoints"]) - totals[away],
-                      "HomeNonOffensivePoints": int(game["homePoints"]) - totals[home],
-                      "AttributionSource": source})
-    if rejected:
-        # Preserve the exact CFBD payloads needed to reproduce attribution errors.
-        # This audit is written BEFORE strict validation aborts the job.
-        debug_dir = os.path.join("data", "scoring_diagnostics")
-        os.makedirs(debug_dir, exist_ok=True)
-        rejected_ids = {r[0] for r in rejected}
-        report = []
-        for bad_gid, away, home, reason in rejected:
-            game = next((g for g, gid, ds in eligible if gid == bad_gid), None)
-            drives = next((ds for g, gid, ds in eligible if gid == bad_gid), [])
-            plays = plays_by_game.get(bad_gid, [])
-            report.append({
-                "game_id": bad_gid, "away": away, "home": home, "reason": reason,
-                "away_score": None if game is None else game.get("awayPoints"),
-                "home_score": None if game is None else game.get("homePoints"),
-                "drive_count": len(drives), "play_count": len(plays),
-            })
-        summary_path = os.path.join(debug_dir, f"{YEAR}_rejected_games.json")
-        with open(summary_path, "w", encoding="utf-8") as handle:
-            json.dump(report, handle, indent=2, ensure_ascii=False)
-        # A small number of full raw records is sufficient for debugging and
-        # avoids flooding GitHub Actions logs with thousands of play rows.
-        for bad_gid, away, home, reason in rejected[:3]:
-            game = next((g for g, gid, ds in eligible if gid == bad_gid), None)
-            drives = next((ds for g, gid, ds in eligible if gid == bad_gid), [])
-            sample = {"game": game, "reason": reason, "drives": drives,
-                      "plays": plays_by_game.get(bad_gid, [])}
-            with open(os.path.join(debug_dir, f"game_{bad_gid}.json"), "w", encoding="utf-8") as handle:
-                json.dump(sample, handle, indent=2, ensure_ascii=False, default=str)
-        print(f"Scoring diagnostics saved: {summary_path} and first 3 rejected games")
-        print(f"WARNING: {len(rejected)} completed FBS games still ambiguous")
-        for row in rejected[:30]:
-            print("  Rejected:", *row)
-    if not result:
-        raise SystemExit("No valid games; existing rankings preserved")
-    if rejected and os.getenv("CFB_ALLOW_PARTIAL_SCORING", "0") != "1":
-        raise SystemExit("Scoring attribution remains ambiguous; existing rankings preserved. "
-                         "Use CFB_ALLOW_PARTIAL_SCORING=1 ONLY for testing.")
-    print(f"Validated offensive scoring: {len(result)} games; "
-          f"play-by-play fallback for {sum(x['AttributionSource']=='plays' for x in audit)} games")
-    return result, selected_drives, audit
 
 
 # Retrieve and organize drive data.
@@ -1012,7 +742,7 @@ def add_record(ratings_df: pd.DataFrame, games: list) -> pd.DataFrame:
 # No blowout cap is applied. Every point and every completed drive remains in
 # the adjusted-rating input. Opponent quality is handled by the schedule
 # adjustment rather than by discarding part of an actual scoring margin.
-def build_game_efficiency(games: list, game_drive_counts: dict, fbs_teams: set, scoring_by_game: dict = None) -> pd.DataFrame:
+def build_game_efficiency(games: list, game_drive_counts: dict, fbs_teams: set) -> pd.DataFrame:
     rows = []
     skipped_missing_drives = 0
 
@@ -1035,11 +765,6 @@ def build_game_efficiency(games: list, game_drive_counts: dict, fbs_teams: set, 
         if game_id is None:
             continue
         gid = str(game_id)
-        if scoring_by_game is not None:
-            if gid not in scoring_by_game:
-                continue
-            home_pts = scoring_by_game[gid].get(home, 0)
-            away_pts = scoring_by_game[gid].get(away, 0)
 
         home_off = game_drive_counts.get((gid, home), {}).get("off", 0)
         home_def = game_drive_counts.get((gid, home), {}).get("def", 0)
@@ -1615,9 +1340,9 @@ def main():
         f"https://api.collegefootballdata.com/drives?year={YEAR}&seasonType=both"
     )
 
-    # The scoreboard/live data still populate the schedule and live status.
-    # Ratings use completed, validated games only, avoiding mismatched live
-    # scoreboard and drive totals.
+    # Live games are intentionally layered on top of the normal season data.
+    # Current scores + completed live drives affect efficiency, but W/L stays
+    # unchanged until the game becomes final.
     live_scoreboard = get_live_scoreboard()
     games, drives_raw, live_metadata = merge_live_games(
         games, drives_raw, live_scoreboard, team_id_map
@@ -1626,18 +1351,15 @@ def main():
     print(f"Live scoreboard games detected: {len(live_scoreboard)}")
     print(f"Live games merged into ratings: {len(live_metadata)}")
 
-    scoring_by_game, rated_drives, scoring_audit = calculate_offensive_scoring(games, drives_raw)
-    points_df = get_points(games, scoring_by_game)
+    points_df = get_points(games)
     fbs_teams = set(points_df["team"])
 
-    # Use the SAME validated, completed-game drives in both numerator and
-    # denominator. Live games remain in Schedule.csv / Live.json, not ratings.
-    season_drives_df = aggregate_season_drives(rated_drives, fbs_teams)
+    season_drives_df = aggregate_season_drives(drives_raw, fbs_teams)
     ratings_df = compute_ratings(points_df, season_drives_df)   # Calculate unadjusted efficiency ratings.
     ratings_df = add_record(ratings_df, games)                    # Add each team's FBS record and raw ranking.
 
-    game_drive_counts = aggregate_game_drives(rated_drives, fbs_teams)
-    game_eff_df = build_game_efficiency(games, game_drive_counts, fbs_teams, scoring_by_game)
+    game_drive_counts = aggregate_game_drives(drives_raw, fbs_teams)
+    game_eff_df = build_game_efficiency(games, game_drive_counts, fbs_teams)
     adj_df = solve_adjusted_efficiency(game_eff_df)               # Adjust efficiency for opponent strength.
 
     ratings_df = ratings_df.merge(adj_df, on="Team", how="left")
@@ -1766,12 +1488,6 @@ def main():
             ratings_df[column] = numeric.map(
                 lambda value: "" if pd.isna(value) else str(int(round(value)))
             )
-
-    # A diagnostic CSV preserving the REAL game scores alongside offensive
-    # attribution. Write only after validation and complete calculation.
-    audit_file = os.path.join(data_dir, f"{YEAR} Scoring Audit.csv")
-    pd.DataFrame(scoring_audit).to_csv(audit_file, index=False)
-    print("Saved scoring audit to:", audit_file)
 
     ratings_df.to_csv(
         outfile,
